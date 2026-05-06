@@ -1,0 +1,481 @@
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { PhoneOff, Mic, MicOff, Video, VideoOff, Wallet } from 'lucide-react';
+import { getSocket } from '../services/socket.js';
+import { fetchIceConfig, createPeer, getLocalStream, tuneSenders, openSpectatorPc } from '../services/webrtc.js';
+import { exitFullscreen } from '../utils/fullscreen.js';
+import { useAuthStore } from '../stores/auth.store.js';
+
+const STATUS_LABEL = {
+  starting: 'Starting…',
+  ringing: 'Ringing',
+  connecting: 'Connecting',
+  connected: 'Connected',
+  rejected: 'Call declined',
+  ended: 'Call ended',
+};
+
+export default function Call() {
+  const { peerId } = useParams();
+  const [params] = useSearchParams();
+  const packageId = params.get('package');
+  const nav = useNavigate();
+  const localVideo = useRef();
+  const remoteVideo = useRef();
+  const pcRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const callIdRef = useRef(null);
+  const [status, setStatus] = useState('starting');
+  const [error, setError] = useState(null);
+  const [perMinuteRate, setPerMinuteRate] = useState(0);
+  const [billed, setBilled] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let calleeAccepted = false;
+    let calleeReady = false;
+    let offerSent = false;
+    const spectatorPcs = new Map(); // adminId -> { pc, cleanup }
+    const socket = getSocket();
+
+    const cleanup = () => {
+      pcRef.current?.close();
+      pcRef.current = null;
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+      for (const { cleanup } of spectatorPcs.values()) cleanup();
+      spectatorPcs.clear();
+    };
+
+    const trySendOffer = async () => {
+      if (offerSent) return;
+      if (!calleeAccepted || !calleeReady) return;
+      if (!pcRef.current || !callIdRef.current) return;
+      offerSent = true;
+      const offer = await pcRef.current.createOffer();
+      await pcRef.current.setLocalDescription(offer);
+      socket.emit('rtc:offer', { callId: callIdRef.current, sdp: offer });
+      tuneSenders(pcRef.current).catch(() => {});
+    };
+
+    const start = async () => {
+      try {
+        const ice = await fetchIceConfig();
+        const stream = await getLocalStream();
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        localStreamRef.current = stream;
+        if (localVideo.current) localVideo.current.srcObject = stream;
+
+        const pc = createPeer(ice.iceServers);
+        pcRef.current = pc;
+        stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+        pc.ontrack = (e) => {
+          if (remoteVideo.current) remoteVideo.current.srcObject = e.streams[0];
+        };
+        pc.onicecandidate = (e) => {
+          if (e.candidate && callIdRef.current) {
+            socket.emit('rtc:ice', { callId: callIdRef.current, candidate: e.candidate });
+          }
+        };
+
+        socket.emit('call:invite', { toUserId: peerId, packageId: packageId || undefined }, (ack) => {
+          if (ack?.code === 'INSUFFICIENT_CREDITS') {
+            setError(`Not enough credits — need ${ack.required}, you have ${ack.balance}.`);
+            setTimeout(() => nav(-1), 2500);
+            return;
+          }
+          if (ack?.error) {
+            setError(ack.error);
+            return;
+          }
+          if (ack.perMinuteRate) setPerMinuteRate(ack.perMinuteRate);
+          callIdRef.current = ack.callId;
+          setStatus('ringing');
+        });
+      } catch (err) {
+        setError(err.message);
+      }
+    };
+
+    socket.on('call:accepted', ({ callId }) => {
+      if (callId !== callIdRef.current) return;
+      calleeAccepted = true;
+      setStatus('connecting');
+      trySendOffer();
+    });
+
+    socket.on('rtc:ready', ({ callId }) => {
+      if (callId !== callIdRef.current) return;
+      calleeReady = true;
+      trySendOffer();
+    });
+
+    socket.on('rtc:answer', async ({ callId, sdp }) => {
+      if (callId !== callIdRef.current) return;
+      await pcRef.current?.setRemoteDescription(sdp);
+      setStatus('connected');
+    });
+
+    socket.on('rtc:ice', async ({ callId, candidate }) => {
+      if (callId !== callIdRef.current) return;
+      try { await pcRef.current.addIceCandidate(candidate); } catch {}
+    });
+
+    socket.on('call:billed', ({ callId, totalBilled, walletBalance }) => {
+      if (callId !== callIdRef.current) return;
+      setBilled(totalBilled);
+      const me = useAuthStore.getState().user;
+      if (me) useAuthStore.getState().setUser({ ...me, walletBalance });
+    });
+
+    socket.on('call:rejected', () => {
+      setStatus('rejected');
+      cleanup();
+      setTimeout(() => nav(-1), 1500);
+    });
+    socket.on('call:ended', () => {
+      setStatus('ended');
+      cleanup();
+      setTimeout(() => nav(-1), 1200);
+    });
+
+    // Admin moderation: when an admin asks to spectate, push our outgoing
+    // tracks to them via a fresh send-only peer connection. If the same
+    // admin is reconnecting (left and came back), close the stale PC first
+    // — otherwise the new admin tab never receives an offer.
+    const onAdminJoin = async ({ callId: id, adminId }) => {
+      if (id !== callIdRef.current) return;
+      const existing = spectatorPcs.get(adminId);
+      if (existing) {
+        existing.cleanup();
+        spectatorPcs.delete(adminId);
+      }
+      const stream = localStreamRef.current;
+      if (!stream) return;
+      try {
+        const ice = await fetchIceConfig();
+        const handle = await openSpectatorPc({
+          iceServers: ice.iceServers,
+          localStream: stream,
+          socket,
+          callId: id,
+          adminId,
+        });
+        spectatorPcs.set(adminId, handle);
+      } catch (e) { /* non-fatal */ }
+    };
+    socket.on('admin:spectator-arrived', onAdminJoin);
+
+    start();
+
+    return () => {
+      cancelled = true;
+      socket.off('call:accepted');
+      socket.off('rtc:ready');
+      socket.off('rtc:answer');
+      socket.off('rtc:ice');
+      socket.off('call:billed');
+      socket.off('call:rejected');
+      socket.off('call:ended');
+      socket.off('admin:spectator-arrived', onAdminJoin);
+      if (callIdRef.current) socket.emit('call:hangup', { callId: callIdRef.current });
+      cleanup();
+      exitFullscreen();
+    };
+  }, [peerId]);
+
+  const hangup = () => {
+    const socket = getSocket();
+    if (callIdRef.current) socket.emit('call:hangup', { callId: callIdRef.current });
+    nav(-1);
+  };
+
+  return (
+    <CallShell
+      status={status}
+      error={error}
+      localVideo={localVideo}
+      remoteVideo={remoteVideo}
+      localStreamRef={localStreamRef}
+      onHangup={hangup}
+      perMinuteRate={perMinuteRate}
+      billed={billed}
+    />
+  );
+}
+
+export function CallShell({ status, error, localVideo, remoteVideo, localStreamRef, onHangup, perMinuteRate = 0, billed = 0, earnRate = 0, earned = 0, callerBalance = null, callerBillRate = 0 }) {
+  // Duration timer — starts ticking when status becomes 'connected'.
+  // We tick at 250ms (and store elapsed as a fractional number of seconds)
+  // so the billing pill updates smoothly inside each second.
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(null);
+  useEffect(() => {
+    if (status !== 'connected') return;
+    if (!startRef.current) startRef.current = Date.now();
+    const tick = () => setElapsed((Date.now() - startRef.current) / 1000);
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [status]);
+
+  const me = useAuthStore((s) => s.user);
+  const walletBalance = me?.walletBalance ?? 0;
+
+  // Auto-end the call the moment the live balance hits 0 — don't wait for the
+  // next server billing tick.
+  const endedRef = useRef(false);
+  useEffect(() => {
+    if (endedRef.current) return;
+    if (status !== 'connected' || perMinuteRate <= 0) return;
+    const live = perMinuteRate * (elapsed / 60);
+    const extra = Math.max(0, live - billed);
+    const displayed = walletBalance - extra;
+    if (displayed <= 0) {
+      endedRef.current = true;
+      onHangup?.();
+    }
+  }, [elapsed, walletBalance, status, perMinuteRate, billed, onHangup]);
+
+  const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
+
+  const toggleMute = () => {
+    const track = localStreamRef?.current?.getAudioTracks()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    setMuted(!track.enabled);
+  };
+
+  const toggleCamera = () => {
+    const track = localStreamRef?.current?.getVideoTracks()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    setCameraOff(!track.enabled);
+  };
+
+  return (
+    <div className="h-[100dvh] bg-neutral-950 text-white flex flex-col overflow-hidden relative">
+      {/* Status pill — centered top, clear of the iPhone notch. */}
+      <div
+        className="absolute z-10 left-1/2 -translate-x-1/2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur text-xs font-medium whitespace-nowrap"
+        style={{ top: 'max(env(safe-area-inset-top), 14px)' }}
+      >
+        <span>{error ? `Error: ${error}` : STATUS_LABEL[status] || status}</span>
+        {status === 'connected' && (
+          <>
+            <span className="text-white/40">·</span>
+            <span className="tabular-nums">{formatDuration(elapsed)}</span>
+          </>
+        )}
+      </div>
+
+      {/* Billing / earnings pill area — below the status pill on phones
+          (centered), at top-right on tablets and up. */}
+      <div
+        className="absolute z-10 flex flex-col items-center sm:items-end gap-1.5 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-5"
+        style={{ top: 'calc(max(env(safe-area-inset-top), 14px) + 44px)' }}
+      >
+        {perMinuteRate > 0 && (
+          <BillingPill
+            status={status}
+            elapsed={elapsed}
+            perMinuteRate={perMinuteRate}
+            serverBilled={billed}
+            walletBalance={walletBalance}
+          />
+        )}
+
+        {earnRate > 0 && (
+          <EarningsPill
+            status={status}
+            elapsed={elapsed}
+            earnRate={earnRate}
+            serverEarned={earned}
+            earningsBalance={me?.earningsBalance ?? 0}
+            callerBalance={callerBalance}
+            callerBillRate={callerBillRate}
+          />
+        )}
+      </div>
+
+      <div className="relative flex-1 bg-neutral-900 min-h-0">
+        <video
+          ref={remoteVideo}
+          autoPlay
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover sm:object-contain bg-neutral-900"
+        />
+
+        {/* Local-video PIP — smaller on phones, larger on tablets+. Sits
+            above the controls thanks to bottom-28/sm:bottom-32. */}
+        <div className="absolute right-3 sm:right-5 w-20 sm:w-32 lg:w-40 aspect-[3/4] rounded-2xl overflow-hidden border-2 border-white/40 shadow-xl bg-neutral-800"
+             style={{ bottom: 'calc(max(env(safe-area-inset-bottom), 24px) + 96px)' }}>
+          <video
+            ref={localVideo}
+            autoPlay
+            playsInline
+            muted
+            className={`w-full h-full object-cover transition ${cameraOff ? 'opacity-0' : 'opacity-100'}`}
+          />
+          {cameraOff && (
+            <div className="absolute inset-0 grid place-items-center text-white/70">
+              <VideoOff size={18} />
+            </div>
+          )}
+          {muted && (
+            <div className="absolute top-1 left-1 w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-rose-600 grid place-items-center shadow">
+              <MicOff size={10} strokeWidth={2.5} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Controls — gap shrinks on phones to fit small viewports, and the
+          row sits clear of the iPhone home indicator via safe-area-inset. */}
+      <div
+        className="absolute bottom-0 inset-x-0 flex items-center justify-center gap-3 sm:gap-5"
+        style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 24px)' }}
+      >
+        <ControlBtn onClick={toggleMute} active={muted} ariaLabel={muted ? 'Unmute' : 'Mute'}>
+          {muted ? <MicOff size={20} /> : <Mic size={20} />}
+        </ControlBtn>
+
+        <button
+          onClick={onHangup}
+          aria-label="Hang up"
+          className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 transition grid place-items-center shadow-2xl shadow-rose-700/40"
+        >
+          <PhoneOff size={24} strokeWidth={2.4} />
+        </button>
+
+        <ControlBtn onClick={toggleCamera} active={cameraOff} ariaLabel={cameraOff ? 'Turn camera on' : 'Turn camera off'}>
+          {cameraOff ? <VideoOff size={20} /> : <Video size={20} />}
+        </ControlBtn>
+      </div>
+    </div>
+  );
+}
+
+function BillingPill({ status, elapsed, perMinuteRate, serverBilled, walletBalance = 0 }) {
+  // Smooth, per-second estimate of total billed since the call connected.
+  const live = status === 'connected' ? perMinuteRate * (elapsed / 60) : 0;
+  const billed = Math.max(live, serverBilled || 0);
+
+  // Server bills every minute. Between ticks, show the user a falling balance.
+  const extra = Math.max(0, billed - (serverBilled || 0));
+  const displayedBalance = Math.max(0, walletBalance - extra);
+
+  return (
+    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 backdrop-blur border border-emerald-300/30 text-emerald-200 text-[11px] sm:text-xs font-semibold tabular-nums whitespace-nowrap">
+      <Wallet size={12} />
+      <span>{perMinuteRate.toFixed(1)}/min</span>
+      <span className="text-white/40">·</span>
+      <span>{billed.toFixed(1)} billed</span>
+      <span className="text-white/40">·</span>
+      <span className={displayedBalance < perMinuteRate ? 'text-rose-300' : 'text-emerald-200'}>
+        {displayedBalance.toFixed(1)} left
+      </span>
+    </div>
+  );
+}
+
+function EarningsPill({
+  status,
+  elapsed,
+  earnRate,
+  serverEarned,
+  earningsBalance = 0,
+  callerBalance = null,
+  callerBillRate = 0,
+}) {
+  const live = status === 'connected' ? earnRate * (elapsed / 60) : 0;
+  const earned = Math.max(live, serverEarned || 0);
+  const extra = Math.max(0, earned - (serverEarned || 0));
+  const displayedEarnings = earningsBalance + extra;
+
+  // Smooth caller balance between server billing ticks.
+  // Mirrors how BillingPill does it on the caller side:
+  //   - `live` is the client's running estimate of total credits billed
+  //     since the call connected.
+  //   - `serverBilledOnCaller` is the server-confirmed equivalent
+  //     (derived from serverEarned, since billRate ≈ earnRate × 1.2).
+  //   - The display = last server-confirmed callerBalance, minus whatever
+  //     extra the client thinks has been billed since the last server tick.
+  let displayedCaller = null;
+  if (typeof callerBalance === 'number') {
+    if (status === 'connected' && callerBillRate > 0 && earnRate > 0) {
+      const live = callerBillRate * (elapsed / 60);
+      const serverBilledOnCaller = (serverEarned || 0) * (callerBillRate / earnRate);
+      const extra = Math.max(0, live - serverBilledOnCaller);
+      displayedCaller = Math.max(0, callerBalance - extra);
+    } else {
+      displayedCaller = callerBalance;
+    }
+  }
+  const minutesLeft =
+    displayedCaller != null && callerBillRate > 0 ? displayedCaller / callerBillRate : null;
+  const lowOnCredits = minutesLeft != null && minutesLeft < 1;
+
+  return (
+    <div className="flex flex-col items-center sm:items-end gap-1.5">
+      <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/20 backdrop-blur border border-amber-300/30 text-amber-200 text-[11px] sm:text-xs font-semibold tabular-nums whitespace-nowrap">
+        <Wallet size={12} />
+        <span>+{earnRate.toFixed(1)}/min</span>
+        <span className="text-white/40">·</span>
+        <span>{earned.toFixed(1)} earned</span>
+        <span className="text-white/40">·</span>
+        <span className="text-amber-100">{displayedEarnings.toFixed(1)} total</span>
+      </div>
+
+      {displayedCaller != null && (
+        <div
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur border text-[11px] sm:text-xs font-semibold tabular-nums whitespace-nowrap ${
+            lowOnCredits
+              ? 'bg-rose-500/20 border-rose-300/40 text-rose-100'
+              : 'bg-white/10 border-white/20 text-white/80'
+          }`}
+          title="Caller's remaining wallet credits"
+        >
+          <Wallet size={12} />
+          <span>caller: {displayedCaller.toFixed(1)} credits</span>
+          {minutesLeft != null && (
+            <>
+              <span className="text-white/40">·</span>
+              <span>{minutesLeft.toFixed(1)} min left</span>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatDuration(sec) {
+  const s = Math.max(0, sec | 0);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  return `${m}:${String(ss).padStart(2, '0')}`;
+}
+
+function ControlBtn({ children, onClick, active, ariaLabel }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={ariaLabel}
+      aria-pressed={active}
+      className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full grid place-items-center transition active:scale-95 ${
+        active
+          ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-700/40'
+          : 'bg-white/15 hover:bg-white/25 backdrop-blur text-white border border-white/20'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}

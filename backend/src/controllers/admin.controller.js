@@ -1,0 +1,61 @@
+import * as adminService from '../services/admin.service.js';
+import { notFound } from '../utils/HttpError.js';
+
+export async function listUsers(req, res) {
+  res.json(await adminService.listAllUsers(req.query));
+}
+
+export async function userDetails(req, res) {
+  res.json(await adminService.getUserDetails(req.params.userId));
+}
+
+export async function verificationPhoto(req, res) {
+  const out = await adminService.getVerificationPhoto(req.params.userId);
+  if (!out) throw notFound('Verification photo not found');
+  res.setHeader('Content-Type', out.contentType);
+  res.setHeader('Cache-Control', 'private, no-cache');
+  res.setHeader('Content-Length', out.buffer.length);
+  res.end(out.buffer);
+}
+
+export async function consentPdf(req, res) {
+  const out = await adminService.getConsentPdf(req.params.userId);
+  if (!out) throw notFound('Consent PDF not found');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="consent-${req.params.userId}.pdf"`);
+  res.setHeader('Cache-Control', 'private, no-cache');
+  res.setHeader('Content-Length', out.buffer.length);
+  res.end(out.buffer);
+}
+
+export async function ban(req, res) {
+  res.json(await adminService.banUser(req.user.id, req.params.userId));
+}
+
+export async function unban(req, res) {
+  res.json(await adminService.unbanUser(req.params.userId));
+}
+
+export async function softDelete(req, res) {
+  res.json(await adminService.softDeleteUser(req.user.id, req.params.userId));
+}
+
+export async function restore(req, res) {
+  res.json(await adminService.restoreUser(req.user.id, req.params.userId));
+}
+
+export async function activeCalls(_req, res) {
+  res.json(await adminService.listActiveCalls());
+}
+
+export async function adjustWallet(req, res) {
+  res.json(await adminService.adjustWallet(req.user.id, req.params.userId, req.body.delta));
+}
+
+export async function adjustEarnings(req, res) {
+  res.json(await adminService.adjustEarnings(req.user.id, req.params.userId, req.body.delta));
+}
+
+export async function setRole(req, res) {
+  res.json(await adminService.setRole(req.user.id, req.params.userId, req.body.role));
+}

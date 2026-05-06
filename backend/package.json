@@ -1,0 +1,49 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "dev:worker": "nodemon src/workers/index.js",
+    "start": "node src/server.js",
+    "start:worker": "node src/workers/index.js",
+    "seed:demo": "node scripts/seed-demo.js",
+    "seed:indian": "node scripts/seed-indian-creators.js",
+    "remove:users": "node scripts/remove-users.js",
+    "round:balances": "node scripts/round-balances.js",
+    "seed:subs": "node scripts/seed-subscriber-counts.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.730.0",
+    "@aws-sdk/s3-request-presigner": "^3.730.0",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "argon2": "^0.40.3",
+    "bullmq": "^5.12.0",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.5.1",
+    "morgan": "^1.10.0",
+    "nanoid": "^5.0.7",
+    "pdfkit": "^0.15.0",
+    "pino": "^9.3.2",
+    "pino-http": "^10.2.0",
+    "rate-limit-redis": "^4.2.0",
+    "sharp": "^0.33.4",
+    "socket.io": "^4.7.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "pino-pretty": "^11.2.2"
+  }
+}

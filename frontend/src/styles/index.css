@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  /* Kill the rubber-band / elastic overscroll on iOS Safari and Android
+     Chrome at the document level. Inner scroll containers also opt out
+     so reaching the end of a list doesn't bounce the whole app. */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+  body {
+    @apply m-0 font-sans antialiased text-ink;
+  }
+  /* Apply to any element that scrolls — Tailwind's overflow-y-auto turns
+     this on, so anything with that class gets non-bouncy scrolling too. */
+  .overflow-y-auto,
+  .overflow-y-scroll,
+  .overflow-auto,
+  .overflow-scroll {
+    overscroll-behavior: contain;
+  }
+}
+
+@layer components {
+  /* Non-auth chrome kept lightweight; can be migrated incrementally */
+  .app { @apply min-h-screen; }
+  .nav { @apply flex items-center justify-between px-5 py-3 border-b border-black/10; }
+  .nav .brand { @apply font-bold no-underline; }
+  .nav__links { @apply flex items-center gap-3.5; }
+  .nav a { @apply no-underline; }
+  .main { @apply mx-auto max-w-3xl p-5; }
+  .error { @apply text-rose-600; }
+  .muted { @apply text-neutral-500 text-sm; }
+
+  .gallery { @apply grid grid-cols-3 gap-1.5 mb-3; }
+  .tile { @apply relative aspect-square bg-black/5 rounded-lg overflow-hidden cursor-pointer; }
+  .tile img { @apply w-full h-full object-cover block; }
+  .tile--locked img { filter: blur(8px) brightness(0.85); }
+  .tile--empty { @apply border border-dashed border-black/15; }
+  .tile__lock { @apply absolute inset-0 grid place-items-center text-2xl pointer-events-none; }
+
+  .avatar { @apply w-24 h-24 rounded-full object-cover bg-black/5; }
+  .avatar--sm { @apply w-8 h-8; }
+  .avatar--empty { @apply bg-black/5; }
+  .avatar__edit { @apply absolute bottom-0 right-0 text-xs px-1.5 py-0.5; }
+  .avatar-wrap { @apply relative; }
+
+  .profile__header { @apply flex items-start gap-4 mb-5; }
+  .actions { @apply flex gap-2 mt-2; }
+  .popular { @apply list-none p-0; }
+  .popular li a { @apply flex items-center gap-2.5 py-2.5 no-underline border-b border-black/10; }
+  .popular img { @apply w-10 h-10 rounded-full object-cover; }
+  .requests { @apply list-none p-0; }
+  .requests li { @apply flex justify-between items-center py-2.5 border-b border-black/10; }
+
+  .call__videos { @apply relative w-full aspect-video bg-black rounded-lg overflow-hidden my-3; }
+  .call__remote { @apply w-full h-full object-cover; }
+  .call__local { @apply absolute bottom-3 right-3 w-1/4 aspect-video border-2 border-white rounded-md object-cover; }
+
+  .incoming {
+    @apply fixed bottom-5 right-5 bg-neutral-900 text-white px-4 py-3 rounded-lg flex flex-col gap-2 shadow-2xl;
+  }
+}
