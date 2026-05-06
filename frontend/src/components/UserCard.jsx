@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Heart } from 'lucide-react';
+import { Heart, TrendingUp } from 'lucide-react';
 import { useAuthStore } from '../stores/auth.store.js';
 import { useLoginPromptStore } from '../stores/loginPrompt.store.js';
 
@@ -44,12 +44,25 @@ export default function UserCard({ user }) {
         {format(user.followerCount)}
       </span>
 
-      {/* Top-right LIVE / online badge */}
-      {user.online && (
+      {/* Top-right: LIVE indicator OR creator income chip. We prefer the
+          live badge when the creator is online. The income chip uses ₹
+          + a TrendingUp arrow so it reads as "they've earned this much"
+          rather than a price they charge. */}
+      {user.online ? (
         <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide text-white bg-rose-600 shadow-md">
           <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
           LIVE
         </span>
+      ) : (
+        typeof user.earningsBalance === 'number' && user.earningsBalance > 0 && (
+          <span
+            title={`Lifetime earnings: ₹${user.earningsBalance.toLocaleString('en-IN')}`}
+            className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white bg-emerald-600/95 backdrop-blur-sm shadow-md tabular-nums"
+          >
+            <TrendingUp size={10} strokeWidth={2.6} />
+            ₹{format(user.earningsBalance)}
+          </span>
+        )
       )}
 
       {/* Bottom: name + status */}

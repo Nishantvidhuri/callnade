@@ -24,25 +24,42 @@ const PIN_3 = 'https://i.pinimg.com/736x/0d/8e/31/0d8e3141021d36d5d309637fe38b92
 const PIN_4 = 'https://i.pinimg.com/736x/11/15/97/111597d1117ee5af22fb484d939070d3.jpg';
 const PIN_5 = 'https://i.pinimg.com/736x/04/f3/27/04f3274682f5110050fc2a7504636d95.jpg';
 const PIN_6 = 'https://i.pinimg.com/736x/a3/94/c6/a394c673b4e93f68c242942fbc0483e2.jpg';
+const PIN_7 = 'https://i.pinimg.com/736x/23/7f/0a/237f0a2c049cf118d3e56489c4117388.jpg';
+const PIN_8 = 'https://i.pinimg.com/736x/c9/81/91/c98191ef2040c5892caa898db9dceb2c.jpg';
+const PIN_9 = 'https://i.pinimg.com/736x/42/a1/de/42a1de36d794fdd8f1b47e5e404c9b77.jpg';
+const PIN_10 = 'https://i.pinimg.com/736x/f9/da/12/f9da12acd70ed5b0558ca9492161b2fa.jpg';
+const PIN_11 = 'https://i.pinimg.com/736x/ef/d7/37/efd73781d44ff140424f734b8ed9a88b.jpg';
+const PIN_12 = 'https://i.pinimg.com/736x/62/95/48/6295484ec7fbaec39f3daed40069c2a0.jpg';
+const PIN_13 = 'https://i.pinimg.com/736x/ce/08/ce/ce08ce625048f7b0cc34a9b0cd01f0cc.jpg';
+const PIN_14 = 'https://i.pinimg.com/736x/ff/b0/be/ffb0be5d11b0c7e34349bf5b631494c9.jpg';
 
-// Standard package menu — every creator offers the same set, only prices
-// differ per creator. 30-min calls are priced above 250 credits.
-const PACKAGE_MENU = {
-  aanya:  [{ mins: 15, price: 180 }, { mins: 30, price: 320 }],
-  diya:   [{ mins: 15, price: 160 }, { mins: 30, price: 280 }],
-  ishita: [{ mins: 15, price: 200 }, { mins: 30, price: 360 }],
-  kavya:  [{ mins: 15, price: 170 }, { mins: 30, price: 300 }],
-  meera:  [{ mins: 15, price: 220 }, { mins: 30, price: 400 }],
-  priya:  [{ mins: 15, price: 150 }, { mins: 30, price: 270 }],
+// Every creator gets 4 packages: audio/video × 15-min/30-min. Prices are
+// randomized within sensible ranges per (kind, duration). 15-min stays
+// in the 150-250 band as requested; 30-min is roughly 2x the 15-min price.
+// Audio is priced ~10–15% lower than video to reflect the lower production.
+const PRICE_RANGES = {
+  audio: { 15: [150, 230], 30: [260, 380] },
+  video: { 15: [170, 250], 30: [290, 450] },
 };
 
-const buildPackages = (username) =>
-  (PACKAGE_MENU[username] || [{ mins: 30, price: 300 }]).map(({ mins, price }) => ({
-    title: `${mins}-min video call`,
-    description: `Live ${mins}-minute video call`,
-    price,
-    durationMinutes: mins,
-  }));
+const randIn = (min, max) => min + Math.floor(Math.random() * (max - min + 1));
+
+const buildPackages = () => {
+  const out = [];
+  for (const callType of ['audio', 'video']) {
+    for (const mins of [15, 30]) {
+      const [lo, hi] = PRICE_RANGES[callType][mins];
+      out.push({
+        title: `${mins}-min ${callType} call`,
+        description: `Live ${mins}-minute ${callType} call`,
+        price: randIn(lo, hi),
+        durationMinutes: mins,
+        callType,
+      });
+    }
+  }
+  return out;
+};
 
 const CREATORS = [
   {
@@ -50,7 +67,7 @@ const CREATORS = [
     displayName: 'Aanya Kapoor',
     bio: 'Mumbai-based dancer & content creator. Bollywood routines on weekends 💃',
     avatar: PIN_1,
-    packages: buildPackages('aanya'),
+    packages: buildPackages(),
   },
   {
     username: 'diya',
@@ -86,6 +103,62 @@ const CREATORS = [
     bio: 'Chef cooking up family recipes & street food 🍛',
     avatar: PIN_6,
     packages: buildPackages('priya'),
+  },
+  {
+    username: 'tara',
+    displayName: 'Tara Joshi',
+    bio: 'Travel vlogger from Goa 🌴 Always chasing the next sunrise',
+    avatar: PIN_7,
+    packages: buildPackages('tara'),
+  },
+  {
+    username: 'pooja',
+    displayName: 'Pooja Mehra',
+    bio: 'Singer + music producer. Indie sound, soulful lyrics 🎶',
+    avatar: PIN_8,
+    packages: buildPackages('pooja'),
+  },
+  {
+    username: 'anjali',
+    displayName: 'Anjali Bhatt',
+    bio: 'Lawyer turned lifestyle blogger. Hyderabad weekends 💼✨',
+    avatar: PIN_9,
+    packages: buildPackages('anjali'),
+  },
+  {
+    username: 'nisha',
+    displayName: 'Nisha Khanna',
+    bio: 'Makeup artist · skincare obsessed · Delhi-based 💄',
+    avatar: PIN_10,
+    packages: buildPackages('nisha'),
+  },
+  {
+    username: 'ananya',
+    displayName: 'Ananya Bose',
+    bio: 'Chef cooking comfort food on weekends. Kolkata at heart 🍲',
+    avatar: PIN_11,
+    packages: buildPackages('ananya'),
+  },
+  {
+    username: 'sia',
+    displayName: 'Sia Malhotra',
+    bio: 'Hyderabad-based dance teacher. Kathak meets contemporary 💃',
+    avatar: PIN_12,
+    packages: buildPackages('sia'),
+  },
+  {
+    username: 'tanvi',
+    displayName: 'Tanvi Desai',
+    bio: 'Fashion designer · slow living advocate 🌸',
+    avatar: PIN_13,
+    packages: buildPackages('tanvi'),
+  },
+  {
+    username: 'zara',
+    displayName: 'Zara Khan',
+    bio: 'Stand-up comedian and writer. Mumbai open mics 🎤',
+    avatar: PIN_14,
+    packages: buildPackages('zara'),
   },
 ];
 

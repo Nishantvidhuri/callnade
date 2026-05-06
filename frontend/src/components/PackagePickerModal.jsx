@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Video, X, Wallet } from 'lucide-react';
+import { Video, X, Wallet, Phone } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { fmtCredits } from '../utils/formatCredits.js';
@@ -67,6 +67,7 @@ export default function PackagePickerModal({ peer, open, onClose, onStart }) {
               {packages.map((p) => {
                 const perMin = p.durationMinutes ? p.price / p.durationMinutes : null;
                 const insufficient = balance < p.price;
+                const isAudio = p.callType === 'audio';
                 return (
                   <li
                     key={p.id}
@@ -74,7 +75,17 @@ export default function PackagePickerModal({ peer, open, onClose, onStart }) {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="font-semibold text-sm truncate">{p.title}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-semibold text-sm truncate">{p.title}</p>
+                          <span
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-full ${
+                              isAudio ? 'bg-sky-100 text-sky-700' : 'bg-brand-100 text-brand-600'
+                            }`}
+                          >
+                            {isAudio ? <Phone size={9} /> : <Video size={9} />}
+                            {isAudio ? 'Audio' : 'Video'}
+                          </span>
+                        </div>
                         {p.description && (
                           <p className="text-xs text-neutral-500 mt-0.5 line-clamp-2">{p.description}</p>
                         )}
@@ -97,12 +108,12 @@ export default function PackagePickerModal({ peer, open, onClose, onStart }) {
                       ) : (
                         <button
                           onClick={() => {
-                            onStart(p.id);
+                            onStart(p.id, p.callType || 'video');
                             onClose();
                           }}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full text-white bg-tinder hover:brightness-110 transition"
                         >
-                          <Video size={12} /> Start
+                          {isAudio ? <Phone size={12} /> : <Video size={12} />} Start
                         </button>
                       )}
                     </div>

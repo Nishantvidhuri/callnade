@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Send, Video } from 'lucide-react';
+import { ArrowLeft, Send, Video, Phone } from 'lucide-react';
 import { useAuthStore } from '../stores/auth.store.js';
 import { useChatStore } from '../stores/chat.store.js';
 import { getSocket } from '../services/socket.js';
@@ -15,6 +15,8 @@ export default function ChatPanel({ peer, onBack }) {
   const [text, setText] = useState('');
   const [error, setError] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Which call type to start once a package is picked. Defaults to video.
+  const [pickerCallType, setPickerCallType] = useState('video');
   const scrollRef = useRef(null);
 
   // Anyone can message anyone — no subscription gate, so no "blocked" state.
@@ -22,15 +24,21 @@ export default function ChatPanel({ peer, onBack }) {
     setError(null);
   }, [peer.id]);
 
-  const startCall = () => {
+  const startCall = (type = 'video') => {
+    setPickerCallType(type);
     setPickerOpen(true);
   };
 
-  const startCallWithPackage = (packageId) => {
+  const startCallWithPackage = (packageId, packageCallType) => {
     setDrawerOpen(false);
     enterFullscreenOnMobile();
-    const qs = packageId ? `?package=${packageId}` : '';
-    nav(`/call/${peer.id}${qs}`);
+    const params = new URLSearchParams();
+    if (packageId) params.set('package', packageId);
+    // Package's own callType wins over the picker default — the creator
+    // configured this package for that mode specifically.
+    params.set('type', packageCallType || pickerCallType);
+    if (peer?.username) params.set('peer', peer.username);
+    nav(`/call/${peer.id}?${params.toString()}`);
   };
 
   useEffect(() => {
@@ -80,13 +88,24 @@ export default function ChatPanel({ peer, onBack }) {
           </p>
         </div>
         {me?.role !== 'provider' && (
-          <button
-            onClick={startCall}
-            aria-label="Start video call"
-            className="w-9 h-9 grid place-items-center rounded-full text-brand-600 hover:bg-brand-50 transition"
-          >
-            <Video size={18} strokeWidth={1.8} />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => startCall('audio')}
+              aria-label="Start audio call"
+              title="Audio call"
+              className="w-9 h-9 grid place-items-center rounded-full text-brand-600 hover:bg-brand-50 transition"
+            >
+              <Phone size={18} strokeWidth={1.8} />
+            </button>
+            <button
+              onClick={() => startCall('video')}
+              aria-label="Start video call"
+              title="Video call"
+              className="w-9 h-9 grid place-items-center rounded-full text-brand-600 hover:bg-brand-50 transition"
+            >
+              <Video size={18} strokeWidth={1.8} />
+            </button>
+          </div>
         )}
       </div>
 

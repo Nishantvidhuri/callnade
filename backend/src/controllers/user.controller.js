@@ -29,7 +29,11 @@ export async function mutuals(req, res) {
 }
 
 export async function online(req, res) {
-  res.json(await userService.listOnline({ ...req.query, excludeUserId: req.user?.id }));
+  res.json(await userService.listOnline({
+    ...req.query,
+    adult: req.query?.adult === 'true' || req.query?.adult === '1',
+    excludeUserId: req.user?.id,
+  }));
 }
 
 export async function upgradeToProvider(req, res) {

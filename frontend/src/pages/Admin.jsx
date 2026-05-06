@@ -177,12 +177,18 @@ export default function Admin() {
             >
               <ArrowLeft size={18} strokeWidth={1.8} />
             </button>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
                 <Shield size={22} className="text-brand-500" /> Admin
               </h1>
               <p className="text-sm text-neutral-500 mt-0.5">All accounts on callnade</p>
             </div>
+            <Link
+              to="/admin/visits"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition shrink-0"
+            >
+              📊 <span className="hidden sm:inline">Visits</span>
+            </Link>
           </div>
           <div className="relative max-w-md">
             <Search

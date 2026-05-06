@@ -19,6 +19,10 @@ export default function Call() {
   const { peerId } = useParams();
   const [params] = useSearchParams();
   const packageId = params.get('package');
+  // 'audio' or 'video'. Default 'video' for backwards compat.
+  const callType = params.get('type') === 'audio' ? 'audio' : 'video';
+  // For the audio-call hero — falls back to '?' if not provided.
+  const peerLabel = params.get('peer') || null;
   const nav = useNavigate();
   const localVideo = useRef();
   const remoteVideo = useRef();
@@ -61,7 +65,7 @@ export default function Call() {
     const start = async () => {
       try {
         const ice = await fetchIceConfig();
-        const stream = await getLocalStream();
+        const stream = await getLocalStream({ video: callType === 'video' });
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -81,7 +85,7 @@ export default function Call() {
           }
         };
 
-        socket.emit('call:invite', { toUserId: peerId, packageId: packageId || undefined }, (ack) => {
+        socket.emit('call:invite', { toUserId: peerId, packageId: packageId || undefined, callType }, (ack) => {
           if (ack?.code === 'INSUFFICIENT_CREDITS') {
             setError(`Not enough credits — need ${ack.required}, you have ${ack.balance}.`);
             setTimeout(() => nav(-1), 2500);
@@ -131,15 +135,18 @@ export default function Call() {
       if (me) useAuthStore.getState().setUser({ ...me, walletBalance });
     });
 
+    // Call ended from either side → tear down WebRTC, show the ended
+    // pill briefly, then go to home. Always nav to '/' (not back) so we
+    // never accidentally close the tab when the call was the entry point.
     socket.on('call:rejected', () => {
       setStatus('rejected');
       cleanup();
-      setTimeout(() => nav(-1), 1500);
+      setTimeout(() => nav('/', { replace: true }), 1500);
     });
     socket.on('call:ended', () => {
       setStatus('ended');
       cleanup();
-      setTimeout(() => nav(-1), 1200);
+      setTimeout(() => nav('/', { replace: true }), 1200);
     });
 
     // Admin moderation: when an admin asks to spectate, push our outgoing
@@ -190,7 +197,9 @@ export default function Call() {
   const hangup = () => {
     const socket = getSocket();
     if (callIdRef.current) socket.emit('call:hangup', { callId: callIdRef.current });
-    nav(-1);
+    // Always go to home (not back). Avoids closing the tab when /call/:id
+    // was the entry point, and gives the user a consistent landing.
+    nav('/', { replace: true });
   };
 
   return (
@@ -203,11 +212,14 @@ export default function Call() {
       onHangup={hangup}
       perMinuteRate={perMinuteRate}
       billed={billed}
+      callType={callType}
+      peerLabel={peerLabel}
     />
   );
 }
 
-export function CallShell({ status, error, localVideo, remoteVideo, localStreamRef, onHangup, perMinuteRate = 0, billed = 0, earnRate = 0, earned = 0, callerBalance = null, callerBillRate = 0 }) {
+export function CallShell({ status, error, localVideo, remoteVideo, localStreamRef, onHangup, perMinuteRate = 0, billed = 0, earnRate = 0, earned = 0, callerBalance = null, callerBillRate = 0, callType = 'video', peerLabel = null }) {
+  const isAudio = callType === 'audio';
   // Duration timer — starts ticking when status becomes 'connected'.
   // We tick at 250ms (and store elapsed as a fractional number of seconds)
   // so the billing pill updates smoothly inside each second.
@@ -303,35 +315,62 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
       </div>
 
       <div className="relative flex-1 bg-neutral-900 min-h-0">
-        <video
-          ref={remoteVideo}
-          autoPlay
-          playsInline
-          className="absolute inset-0 w-full h-full object-cover sm:object-contain bg-neutral-900"
-        />
+        {isAudio ? (
+          <>
+            {/* Remote audio — invisible <audio> element plays the peer's voice. */}
+            <audio ref={remoteVideo} autoPlay playsInline className="hidden" />
 
-        {/* Local-video PIP — smaller on phones, larger on tablets+. Sits
-            above the controls thanks to bottom-28/sm:bottom-32. */}
-        <div className="absolute right-3 sm:right-5 w-20 sm:w-32 lg:w-40 aspect-[3/4] rounded-2xl overflow-hidden border-2 border-white/40 shadow-xl bg-neutral-800"
-             style={{ bottom: 'calc(max(env(safe-area-inset-bottom), 24px) + 96px)' }}>
-          <video
-            ref={localVideo}
-            autoPlay
-            playsInline
-            muted
-            className={`w-full h-full object-cover transition ${cameraOff ? 'opacity-0' : 'opacity-100'}`}
-          />
-          {cameraOff && (
-            <div className="absolute inset-0 grid place-items-center text-white/70">
-              <VideoOff size={18} />
+            {/* Audio-call hero: peer avatar + label centered. No camera output. */}
+            <div className="absolute inset-0 grid place-items-center px-6 text-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="relative">
+                  <span className="absolute inset-0 -m-3 rounded-full bg-tinder/30 animate-ping" />
+                  <div className="relative w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-tinder grid place-items-center text-white text-4xl sm:text-5xl font-bold shadow-2xl shadow-tinder/40">
+                    {(peerLabel || '?').charAt(0).toUpperCase()}
+                  </div>
+                </div>
+                <p className="text-lg sm:text-xl font-semibold text-white/95">
+                  {peerLabel || 'Audio call'}
+                </p>
+                <p className="text-sm text-white/60">
+                  {status === 'connected' ? 'Voice connected' : 'Audio call'}
+                </p>
+              </div>
             </div>
-          )}
-          {muted && (
-            <div className="absolute top-1 left-1 w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-rose-600 grid place-items-center shadow">
-              <MicOff size={10} strokeWidth={2.5} />
+          </>
+        ) : (
+          <>
+            <video
+              ref={remoteVideo}
+              autoPlay
+              playsInline
+              className="absolute inset-0 w-full h-full object-cover sm:object-contain bg-neutral-900"
+            />
+
+            {/* Local-video PIP — smaller on phones, larger on tablets+. Sits
+                above the controls thanks to bottom-28/sm:bottom-32. */}
+            <div className="absolute right-3 sm:right-5 w-20 sm:w-32 lg:w-40 aspect-[3/4] rounded-2xl overflow-hidden border-2 border-white/40 shadow-xl bg-neutral-800"
+                 style={{ bottom: 'calc(max(env(safe-area-inset-bottom), 24px) + 96px)' }}>
+              <video
+                ref={localVideo}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover transition ${cameraOff ? 'opacity-0' : 'opacity-100'}`}
+              />
+              {cameraOff && (
+                <div className="absolute inset-0 grid place-items-center text-white/70">
+                  <VideoOff size={18} />
+                </div>
+              )}
+              {muted && (
+                <div className="absolute top-1 left-1 w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-rose-600 grid place-items-center shadow">
+                  <MicOff size={10} strokeWidth={2.5} />
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
 
       {/* Controls — gap shrinks on phones to fit small viewports, and the
@@ -352,9 +391,12 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
           <PhoneOff size={24} strokeWidth={2.4} />
         </button>
 
-        <ControlBtn onClick={toggleCamera} active={cameraOff} ariaLabel={cameraOff ? 'Turn camera on' : 'Turn camera off'}>
-          {cameraOff ? <VideoOff size={20} /> : <Video size={20} />}
-        </ControlBtn>
+        {/* Camera toggle hidden on audio calls — there's no video to toggle. */}
+        {!isAudio && (
+          <ControlBtn onClick={toggleCamera} active={cameraOff} ariaLabel={cameraOff ? 'Turn camera on' : 'Turn camera off'}>
+            {cameraOff ? <VideoOff size={20} /> : <Video size={20} />}
+          </ControlBtn>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Bell, Sparkles, UserPlus, Check, X as XIcon } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useNotificationStore } from '../stores/notification.store.js';
@@ -9,6 +9,7 @@ export default function NotificationDropdown() {
   const unread = useNotificationStore((s) => s.unread);
   const remove = useNotificationStore((s) => s.remove);
   const markAllRead = useNotificationStore((s) => s.markAllRead);
+  const nav = useNavigate();
 
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -36,10 +37,20 @@ export default function NotificationDropdown() {
     remove(notif.id);
   };
 
+  // Mobile (below lg): tapping the bell navigates to the full /notifications
+  // page. Desktop (lg+): toggles the inline dropdown like before.
+  const onBellClick = () => {
+    if (typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches) {
+      nav('/notifications');
+      return;
+    }
+    setOpen((o) => !o);
+  };
+
   return (
     <div ref={wrapRef} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={onBellClick}
         aria-label="Notifications"
         className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full grid place-items-center bg-white/80 backdrop-blur-md border border-white/80 text-neutral-700 hover:bg-white hover:text-ink shadow-sm transition shrink-0"
       >
@@ -51,8 +62,11 @@ export default function NotificationDropdown() {
         )}
       </button>
 
+      {/* Dropdown is desktop-only — mobile users get the full /notifications
+          page via the navigation above. The lg:block guard is belt-and-
+          suspenders in case `open` somehow becomes true on mobile. */}
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-1.5rem)] bg-white border border-neutral-200 rounded-2xl shadow-xl shadow-pink-200/40 overflow-hidden z-50">
+        <div className="hidden lg:block absolute right-0 mt-2 w-80 max-w-[calc(100vw-1.5rem)] bg-white border border-neutral-200 rounded-2xl shadow-xl shadow-pink-200/40 overflow-hidden z-50">
           <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
             <p className="font-semibold text-sm">Notifications</p>
             <button

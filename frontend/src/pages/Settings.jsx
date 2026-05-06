@@ -19,7 +19,7 @@ export default function Settings() {
   const me = useAuthStore((s) => s.user);
 
   const [profile, setProfile] = useState(null); // fresh /users/me
-  const [form, setForm] = useState({ displayName: '', bio: '', isPrivate: true });
+  const [form, setForm] = useState({ displayName: '', bio: '', isPrivate: true, isAdult: false });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -36,6 +36,7 @@ export default function Settings() {
           displayName: u.displayName || '',
           bio: u.bio || '',
           isPrivate: !!u.isPrivate,
+          isAdult: !!u.isAdult,
         });
         // Refresh the auth-store user too so wallet/earnings are current.
         setUser(u);
@@ -215,6 +216,30 @@ export default function Settings() {
                     onChange={(v) => setForm({ ...form, isPrivate: v })}
                   />
                 </div>
+
+                {/* 18+ section disabled for now — keep the markup commented
+                    so we can restore it later without re-deriving the logic.
+                    The backend `isAdult` field + filter still work, just
+                    not exposed via UI. */}
+                {/*
+                {profile?.role === 'provider' && (
+                  <div className="rounded-2xl bg-rose-50/50 border border-rose-200 p-4 flex items-center gap-3">
+                    <span className="w-9 h-9 rounded-full bg-rose-500 grid place-items-center text-white shrink-0 text-[11px] font-bold">
+                      18+
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">Adult content</p>
+                      <p className="text-xs text-neutral-600">
+                        Mark your profile as 18+. You'll be listed under the 18+ section instead of the regular Discover tab. Subscribers must confirm they're 18+ before viewing.
+                      </p>
+                    </div>
+                    <Toggle
+                      checked={form.isAdult}
+                      onChange={(v) => setForm({ ...form, isAdult: v })}
+                    />
+                  </div>
+                )}
+                */}
 
                 {error && (
                   <p className="px-4 py-2.5 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-sm">

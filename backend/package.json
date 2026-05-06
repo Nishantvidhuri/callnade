@@ -14,6 +14,7 @@
     "remove:users": "node scripts/remove-users.js",
     "round:balances": "node scripts/round-balances.js",
     "seed:subs": "node scripts/seed-subscriber-counts.js",
+    "seed:packages": "node scripts/seed-packages.js",
     "test": "node --test"
   },
   "dependencies": {

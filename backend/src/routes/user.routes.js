@@ -12,6 +12,7 @@ const updateMeSchema = z.object({
     displayName: z.string().max(60).optional(),
     bio: z.string().max(280).optional(),
     isPrivate: z.boolean().optional(),
+    isAdult: z.boolean().optional(),
   }),
 });
 

@@ -49,8 +49,15 @@ export async function upgradeToProvider(userId) {
 }
 
 export async function updateMe(userId, patch) {
-  const allowed = (({ displayName, bio, isPrivate }) => ({ displayName, bio, isPrivate }))(patch);
+  const allowed = (({ displayName, bio, isPrivate, isAdult }) => ({
+    displayName, bio, isPrivate, isAdult,
+  }))(patch);
   Object.keys(allowed).forEach((k) => allowed[k] === undefined && delete allowed[k]);
+  // Only providers can mark themselves 18+. If a non-provider tries, drop it.
+  if ('isAdult' in allowed) {
+    const u = await User.findById(userId).select('role').lean();
+    if (u?.role !== 'provider') delete allowed.isAdult;
+  }
   const user = await User.findByIdAndUpdate(userId, allowed, { new: true });
   await redis.del(profileKey(user.username));
   return user.toJSON();
@@ -124,6 +131,7 @@ export async function getPublicProfile(username, viewerId) {
       // profile sees the raw price they set.
       price: isOwner ? p.price : subscriberPrice(p.price),
       durationMinutes: p.durationMinutes ?? null,
+      callType: p.callType || 'video',
     })),
     relationship: {
       isOwner,
@@ -223,20 +231,23 @@ async function getAllOnlineIds() {
   return ids;
 }
 
-export async function listOnline({ limit = 24, excludeUserId } = {}) {
+export async function listOnline({ limit = 24, excludeUserId, adult = false } = {}) {
   const ids = (await getAllOnlineIds()).filter((id) => id !== String(excludeUserId));
   if (!ids.length) return { items: [] };
   // Only providers (creators) appear in "Online now" — regular users and
   // admins are hidden even when their socket is connected. Deleted accounts
-  // are also hidden.
+  // are also hidden. Segmented by isAdult so the 18+ tab only sees 18+
+  // creators and vice versa.
   const users = await User.find({
     _id: { $in: ids },
     role: 'provider',
     banned: { $ne: true },
     deletedAt: null,
+    // Match legacy creators (no isAdult field) into the normal bucket.
+    isAdult: adult ? true : { $ne: true },
   })
     .limit(limit)
-    .select('_id username displayName followerCount avatarMediaId')
+    .select('_id username displayName followerCount avatarMediaId earningsBalance')
     .lean();
   const cards = await formatUserCards(users);
   return { items: cards.map((c) => ({ ...c, online: true })) };
@@ -265,6 +276,7 @@ async function formatUserCards(users) {
     username: u.username,
     displayName: u.displayName,
     followerCount: u.followerCount || 0,
+    earningsBalance: u.earningsBalance || 0,
     avatarUrl: u.avatarMediaId
       ? avatarThumb(avatarMap.get(String(u.avatarMediaId)))
       : null,

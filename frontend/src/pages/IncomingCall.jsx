@@ -19,6 +19,8 @@ export default function IncomingCall() {
   const [billRate] = useState(loc.state?.billRate || 0);
   const [earned, setEarned] = useState(0);
   const [callerBalance, setCallerBalance] = useState(loc.state?.callerBalance || 0);
+  const [callType] = useState(loc.state?.callType === 'audio' ? 'audio' : 'video');
+  const [callerLabel] = useState(loc.state?.callerLabel || null);
 
   useEffect(() => {
     const socket = getSocket();
@@ -37,7 +39,7 @@ export default function IncomingCall() {
     const setup = async () => {
       try {
         const ice = await fetchIceConfig();
-        const stream = await getLocalStream();
+        const stream = await getLocalStream({ video: callType === 'video' });
         if (cancelled) return stream.getTracks().forEach((t) => t.stop());
         localStreamRef.current = stream;
         if (localVideo.current) localVideo.current.srcObject = stream;
@@ -81,15 +83,17 @@ export default function IncomingCall() {
       if (typeof callerBalance === 'number') setCallerBalance(callerBalance);
     });
 
+    // Peer hung up / rejected — show the ended pill briefly, then go home.
+    // Always nav to '/' so we never accidentally close the tab.
     socket.on('call:ended', () => {
       setStatus('ended');
       cleanup();
-      setTimeout(() => nav(-1), 1200);
+      setTimeout(() => nav('/', { replace: true }), 1200);
     });
     socket.on('call:rejected', () => {
       setStatus('ended');
       cleanup();
-      setTimeout(() => nav(-1), 1200);
+      setTimeout(() => nav('/', { replace: true }), 1200);
     });
 
     const onAdminJoin = async ({ callId: id, adminId }) => {
@@ -136,7 +140,7 @@ export default function IncomingCall() {
 
   const hangup = () => {
     getSocket().emit('call:hangup', { callId });
-    nav(-1);
+    nav('/', { replace: true });
   };
 
   return (
@@ -151,6 +155,8 @@ export default function IncomingCall() {
       earned={earned}
       callerBalance={callerBalance}
       callerBillRate={billRate}
+      callType={callType}
+      peerLabel={callerLabel}
     />
   );
 }

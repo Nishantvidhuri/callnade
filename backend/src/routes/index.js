@@ -8,6 +8,7 @@ import { router as popularRouter } from './popular.routes.js';
 import { router as callRouter } from './call.routes.js';
 import { router as adminRouter } from './admin.routes.js';
 import { router as packageRouter } from './package.routes.js';
+import { router as visitRouter } from './visit.routes.js';
 
 export const router = Router();
 
@@ -20,3 +21,4 @@ router.use('/popular', popularRouter);
 router.use('/calls', callRouter);
 router.use('/admin', adminRouter);
 router.use('/packages', packageRouter);
+router.use('/visits', visitRouter);

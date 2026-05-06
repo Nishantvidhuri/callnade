@@ -17,14 +17,16 @@ export function createPeer(iceServers) {
   });
 }
 
-export async function getLocalStream() {
+export async function getLocalStream({ video = true } = {}) {
   return navigator.mediaDevices.getUserMedia({
-    video: {
-      width: { ideal: 1280, max: 1920 },
-      height: { ideal: 720, max: 1080 },
-      frameRate: { ideal: 30, max: 30 },
-      facingMode: 'user',
-    },
+    video: video
+      ? {
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 30, max: 30 },
+          facingMode: 'user',
+        }
+      : false,
     audio: {
       echoCancellation: true,
       noiseSuppression: true,

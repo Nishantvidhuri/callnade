@@ -12,6 +12,10 @@ const packageSchema = new mongoose.Schema(
     description: { type: String, default: '', maxlength: 500 },
     price: { type: Number, required: true, min: 0 },
     durationMinutes: { type: Number, default: null, min: 0 },
+    // 'audio' or 'video' — defaults to video so legacy packages keep behaving
+    // exactly as before. Subscribers see this on the picker and the call
+    // starts in the chosen mode.
+    callType: { type: String, enum: ['audio', 'video'], default: 'video' },
     active: { type: Boolean, default: true },
   },
   { timestamps: true },

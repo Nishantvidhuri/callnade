@@ -42,6 +42,8 @@ export default function Calls() {
           earnRate: call.earnRate || 0,
           billRate: call.perMinuteRate || 0,
           callerBalance: call.callerBalance || 0,
+          callType: call.callType === 'audio' ? 'audio' : 'video',
+          callerLabel: call.from?.username || null,
         },
       });
     });
@@ -131,7 +133,7 @@ export default function Calls() {
                             @{c.from?.username || 'Unknown'}
                           </p>
                           <span className="text-[10px] font-bold tracking-wide uppercase text-rose-600 animate-pulse shrink-0">
-                            Calling
+                            {c.callType === 'audio' ? 'Audio · Calling' : 'Calling'}
                           </span>
                         </div>
                         <p className="text-[11px] text-neutral-400 mt-0.5">{relTime(c.at)}</p>

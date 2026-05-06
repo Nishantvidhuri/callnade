@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, MessageSquare, Video, Camera, Lock, BellRing, BellPlus, Check } from 'lucide-react';
+import { ArrowLeft, MessageSquare, Video, Phone, Camera, Lock, BellRing, BellPlus, Check } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { useChatStore } from '../stores/chat.store.js';
@@ -80,9 +80,10 @@ export default function Profile() {
     });
   };
 
-  const startCall = () => {
+  const startCall = (type = 'video') => {
     enterFullscreenOnMobile();
-    nav(`/call/${profile.user._id}`);
+    const params = new URLSearchParams({ type, peer: profile.user.username });
+    nav(`/call/${profile.user._id}?${params.toString()}`);
   };
 
   const onSlotClick = async (pos, existing) => {
@@ -218,20 +219,38 @@ export default function Profile() {
         ) : (
           <>
             <SubscribeButton rel={rel} busy={busy} onSubscribe={subscribe} onUnsubscribe={unsubscribe} />
+            {/* Below sm: icon-only square buttons. sm+: pill with label.
+                Touch target stays a comfortable ~40px on mobile. */}
             <button
               onClick={message}
               title="Send message"
-              className="px-4 py-2 text-sm font-medium rounded-lg border border-neutral-200 hover:bg-neutral-50 transition inline-flex items-center gap-2"
+              aria-label="Send message"
+              className="w-10 h-10 sm:w-auto sm:h-auto sm:px-4 sm:py-2 grid place-items-center sm:inline-flex sm:items-center sm:gap-2 text-sm font-medium rounded-full sm:rounded-lg border border-neutral-200 hover:bg-neutral-50 transition shrink-0"
             >
-              <MessageSquare size={15} /> Message
+              <MessageSquare size={16} />
+              <span className="hidden sm:inline">Message</span>
             </button>
             {me?.role !== 'provider' && (
-              <button
-                onClick={startCall}
-                className="px-4 py-2 text-sm font-medium rounded-lg border border-neutral-200 hover:bg-neutral-50 transition inline-flex items-center gap-2"
-              >
-                <Video size={15} /> Call
-              </button>
+              <>
+                <button
+                  onClick={() => startCall('audio')}
+                  title="Audio call"
+                  aria-label="Audio call"
+                  className="w-10 h-10 sm:w-auto sm:h-auto sm:px-4 sm:py-2 grid place-items-center sm:inline-flex sm:items-center sm:gap-2 text-sm font-medium rounded-full sm:rounded-lg border border-neutral-200 hover:bg-neutral-50 transition shrink-0"
+                >
+                  <Phone size={16} />
+                  <span className="hidden sm:inline">Audio</span>
+                </button>
+                <button
+                  onClick={() => startCall('video')}
+                  title="Video call"
+                  aria-label="Video call"
+                  className="w-10 h-10 sm:w-auto sm:h-auto sm:px-4 sm:py-2 grid place-items-center sm:inline-flex sm:items-center sm:gap-2 text-sm font-medium rounded-full sm:rounded-lg border border-neutral-200 hover:bg-neutral-50 transition shrink-0"
+                >
+                  <Video size={16} />
+                  <span className="hidden sm:inline">Video</span>
+                </button>
+              </>
             )}
           </>
         )}
@@ -263,7 +282,19 @@ export default function Profile() {
                   key={p.id}
                   className="rounded-2xl bg-white border border-neutral-200 p-4 flex flex-col"
                 >
-                  <p className="font-semibold text-sm">{p.title}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-sm">{p.title}</p>
+                    <span
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-full ${
+                        p.callType === 'audio'
+                          ? 'bg-sky-100 text-sky-700'
+                          : 'bg-brand-100 text-brand-600'
+                      }`}
+                    >
+                      {p.callType === 'audio' ? <Phone size={9} /> : <Video size={9} />}
+                      {p.callType === 'audio' ? 'Audio' : 'Video'}
+                    </span>
+                  </div>
                   {p.description && <p className="text-xs text-neutral-500 mt-1 line-clamp-3">{p.description}</p>}
                   <div className="mt-3 flex items-center justify-between">
                     <span className="text-base font-bold text-emerald-600 tabular-nums">
@@ -285,11 +316,17 @@ export default function Profile() {
                           return;
                         }
                         enterFullscreenOnMobile();
-                        nav(`/call/${profile.user._id}?package=${p.id}`);
+                        const qs = new URLSearchParams({
+                          package: p.id,
+                          type: p.callType === 'audio' ? 'audio' : 'video',
+                          peer: profile.user.username,
+                        });
+                        nav(`/call/${profile.user._id}?${qs.toString()}`);
                       }}
                       className="mt-3 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full text-white bg-tinder shadow-tinder/30 hover:brightness-110 transition"
                     >
-                      <Video size={13} /> Start call
+                      {p.callType === 'audio' ? <Phone size={13} /> : <Video size={13} />}
+                      Start call
                     </button>
                   )}
                 </li>

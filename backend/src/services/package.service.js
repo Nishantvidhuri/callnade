@@ -30,6 +30,7 @@ export async function createPackage(userId, payload) {
     description: payload.description || '',
     price: payload.price,
     durationMinutes: payload.durationMinutes ?? null,
+    callType: payload.callType === 'audio' ? 'audio' : 'video',
     active: payload.active !== false,
   });
   return format(pkg.toObject());
@@ -40,9 +41,12 @@ export async function updatePackage(userId, packageId, patch) {
   const pkg = await Package.findById(packageId);
   if (!pkg) throw notFound('Package not found');
   if (String(pkg.providerId) !== String(userId)) throw forbidden();
-  const allowed = (({ title, description, price, durationMinutes, active }) => ({
-    title, description, price, durationMinutes, active,
+  const allowed = (({ title, description, price, durationMinutes, callType, active }) => ({
+    title, description, price, durationMinutes, callType, active,
   }))(patch);
+  if ('callType' in allowed && allowed.callType !== undefined) {
+    allowed.callType = allowed.callType === 'audio' ? 'audio' : 'video';
+  }
   Object.entries(allowed).forEach(([k, v]) => {
     if (v !== undefined) pkg[k] = v;
   });
@@ -67,6 +71,7 @@ function format(p) {
     description: p.description || '',
     price: p.price,
     durationMinutes: p.durationMinutes ?? null,
+    callType: p.callType || 'video',
     active: !!p.active,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,

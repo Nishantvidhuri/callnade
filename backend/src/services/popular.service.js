@@ -3,17 +3,17 @@ import { Media } from '../models/media.model.js';
 import { redis } from '../config/redis.js';
 import { avatarThumb } from '../utils/signedUrl.js';
 
-// v2: providers-only — bust the old cache key on deploy
-const CACHE_KEY = 'popular:providers:v2';
+// v3: providers, segmented by isAdult — bust caches on deploy.
+const CACHE_KEY_NORMAL = 'popular:providers:v3:normal';
+const CACHE_KEY_ADULT = 'popular:providers:v3:adult';
 const CACHE_TTL = 600;
 const PAGE_SIZE = 20;
 const MAX_CACHED = 1000;
 
-export async function getPopular({ cursor, limit = PAGE_SIZE, viewerId } = {}) {
-  const all = await loadTop();
-  // Hide the viewer from their own popular list (you don't show up to yourself).
-  // Admin accounts are already excluded by the role:'provider' filter in
-  // loadTop(), but we keep this defensive in case role gets changed later.
+export async function getPopular({ cursor, limit = PAGE_SIZE, viewerId, adult = false } = {}) {
+  const all = await loadTop(!!adult);
+  // Hide the viewer from their own popular list. Admin/banned/deleted are
+  // already excluded by the loadTop filter; defensive check stays.
   const visible = all.filter(
     (u) => (!viewerId || String(u._id) !== String(viewerId)) && u.role !== 'admin' && !u.isAdmin,
   );
@@ -35,6 +35,7 @@ export async function getPopular({ cursor, limit = PAGE_SIZE, viewerId } = {}) {
       username: u.username,
       displayName: u.displayName,
       followerCount: u.followerCount,
+      earningsBalance: u.earningsBalance || 0,
       avatarUrl: u.avatarMediaId
         ? avatarThumb(avatarMap.get(String(u.avatarMediaId)))
         : null,
@@ -43,16 +44,24 @@ export async function getPopular({ cursor, limit = PAGE_SIZE, viewerId } = {}) {
   };
 }
 
-async function loadTop() {
-  const cached = await redis.get(CACHE_KEY);
+async function loadTop(adult) {
+  const key = adult ? CACHE_KEY_ADULT : CACHE_KEY_NORMAL;
+  const cached = await redis.get(key);
   if (cached) return JSON.parse(cached);
-  // Only providers (creators) appear in the popular list — admins and
-  // regular users are excluded. Banned accounts are also hidden.
-  const top = await User.find({ role: 'provider', banned: { $ne: true }, deletedAt: null })
+  // Use { $ne: true } / { $eq: true } so legacy creators created before
+  // the isAdult field existed (where the path is missing entirely) still
+  // appear in the normal bucket. A plain { isAdult: false } would skip
+  // them because Mongo treats "missing" and "false" as different values.
+  const top = await User.find({
+    role: 'provider',
+    banned: { $ne: true },
+    deletedAt: null,
+    isAdult: adult ? true : { $ne: true },
+  })
     .sort({ popularityScore: -1, _id: -1 })
     .limit(MAX_CACHED)
-    .select('_id username displayName followerCount avatarMediaId role isAdmin')
+    .select('_id username displayName followerCount avatarMediaId role isAdmin isAdult earningsBalance')
     .lean();
-  await redis.set(CACHE_KEY, JSON.stringify(top), 'EX', CACHE_TTL);
+  await redis.set(key, JSON.stringify(top), 'EX', CACHE_TTL);
   return top;
 }

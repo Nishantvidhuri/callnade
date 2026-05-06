@@ -25,6 +25,7 @@ const USERNAMES = [
   'emma',
   'noah',
   'riya',
+  'saanvi',
   // Old demo users from seed:demo
   'ava',
   'liam',

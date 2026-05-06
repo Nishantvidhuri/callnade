@@ -106,11 +106,14 @@ async function endCall(callId, reason = 'hangup') {
 }
 
 export function registerCallHandlers(io, socket) {
-  socket.on('call:invite', async ({ toUserId, packageId }, ack) => {
+  socket.on('call:invite', async ({ toUserId, packageId, callType }, ack) => {
     try {
       if (!toUserId) return ack?.({ error: 'Missing toUserId' });
       const allowed = await canMessage(socket.user.id, toUserId);
       if (!allowed) return ack?.({ error: 'Not subscribed' });
+      // Default to 'video' for backwards compat. Audio-only calls skip
+      // the video stream on both sides but reuse the same signaling path.
+      const kind = callType === 'audio' ? 'audio' : 'video';
 
       let billRate = 0; // what caller pays per minute (creator price + 20%)
       let earnRate = 0; // what creator earns per minute (creator price)
@@ -157,6 +160,7 @@ export function registerCallHandlers(io, socket) {
         earnRate,
         totalBilled: 0,
         totalEarned: 0,
+        callType: kind,
       });
       socket.join(room(callId));
 
@@ -167,8 +171,9 @@ export function registerCallHandlers(io, socket) {
         perMinuteRate: billRate,
         earnRate,
         callerBalance,
+        callType: kind,
       });
-      ack?.({ ok: true, callId, perMinuteRate: billRate });
+      ack?.({ ok: true, callId, perMinuteRate: billRate, callType: kind });
     } catch (err) {
       logger.error({ err }, 'call:invite failed');
       ack?.({ error: 'invite failed' });

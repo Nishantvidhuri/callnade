@@ -7,6 +7,7 @@ import HomeTopBar from '../components/HomeTopBar.jsx';
 import HomeBottomBar from '../components/HomeBottomBar.jsx';
 import UserCard from '../components/UserCard.jsx';
 import ChatView from '../components/ChatView.jsx';
+import AdultGateModal from '../components/AdultGateModal.jsx';
 
 const PATH_TO_TAB = {
   '/popular': 'popular',
@@ -36,15 +37,23 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+  // 18+ section state. `adultMode` flips the popular/online query to fetch
+  // adult creators. `adultPending` is true while the gate modal is up;
+  // confirming flips adultMode true. Modal re-shows EVERY time the user
+  // taps the 18+ tab fresh (no localStorage cookie).
+  const [adultMode, setAdultMode] = useState(false);
+  const [adultPending, setAdultPending] = useState(false);
   const debounceRef = useRef(null);
   const sentinelRef = useRef(null);
   // Stable refs for the values loadMore needs — avoids re-creating the
   // IntersectionObserver every time `cursor`/`tab` changes.
   const cursorRef = useRef(null);
   const tabRef = useRef(tab);
+  const adultRef = useRef(false);
   const loadingMoreRef = useRef(false);
   useEffect(() => { cursorRef.current = cursor; }, [cursor]);
   useEffect(() => { tabRef.current = tab; }, [tab]);
+  useEffect(() => { adultRef.current = adultMode; }, [adultMode]);
   useEffect(() => { loadingMoreRef.current = loadingMore; }, [loadingMore]);
 
   useEffect(() => {
@@ -72,9 +81,10 @@ export default function Home() {
     const load = async () => {
       try {
         if (tab === 'popular') {
+          const params = { limit: 20, adult: adultMode ? 'true' : 'false' };
           const [popularRes, onlineRes] = await Promise.all([
-            api.get('/popular?limit=20'),
-            api.get('/users/online'),
+            api.get('/popular', { params }),
+            api.get('/users/online', { params: { adult: adultMode ? 'true' : 'false' } }),
           ]);
           setItems(popularRes.data.items);
           setCursor(popularRes.data.nextCursor);
@@ -95,7 +105,7 @@ export default function Home() {
       }
     };
     load();
-  }, [tab, debouncedQuery]);
+  }, [tab, debouncedQuery, adultMode]);
 
   useEffect(() => {
     if (!debouncedQuery) return;
@@ -116,7 +126,9 @@ export default function Home() {
     setLoadingMore(true);
     try {
       const path = tabRef.current === 'popular' ? '/popular' : '/users/me/following';
-      const { data } = await api.get(path, { params: { cursor: c } });
+      const params = { cursor: c };
+      if (tabRef.current === 'popular') params.adult = adultRef.current ? 'true' : 'false';
+      const { data } = await api.get(path, { params });
       setItems((prev) => [...prev, ...data.items]);
       setCursor(data.nextCursor);
     } catch (err) {
@@ -200,6 +212,24 @@ export default function Home() {
               />
             ) : (
               <>
+                {/* 18+ tabs disabled for now — keep <DiscoverTabs/> + the
+                    AdultGateModal mount commented so we can re-enable later
+                    without redoing the wiring. adultMode stays false, so all
+                    queries hit the regular Discover bucket. */}
+                {/*
+                <DiscoverTabs
+                  adultMode={adultMode}
+                  onSwitch={(next) => {
+                    if (next === adultMode) return;
+                    if (next === true) {
+                      setAdultPending(true);     // open the gate modal
+                    } else {
+                      setAdultMode(false);
+                    }
+                  }}
+                />
+                */}
+
                 {onlineItems.length > 0 && (
                   <section className="mb-8">
                     <SectionHeader title="Online now" emoji="🔥" />
@@ -235,6 +265,49 @@ export default function Home() {
       </main>
 
       <HomeBottomBar />
+
+      {/* 18+ gate modal — disabled along with the DiscoverTabs above. */}
+      {/*
+      <AdultGateModal
+        open={adultPending}
+        onConfirm={() => {
+          setAdultPending(false);
+          setAdultMode(true);
+        }}
+        onCancel={() => setAdultPending(false)}
+      />
+      */}
+    </div>
+  );
+}
+
+function DiscoverTabs({ adultMode, onSwitch }) {
+  const baseTabCls =
+    'flex-1 px-4 py-2.5 rounded-full text-sm font-semibold transition focus:outline-none';
+  return (
+    <div className="mb-6 inline-flex w-full max-w-xs p-1 rounded-full bg-white/70 backdrop-blur-md border border-white/80 shadow-sm">
+      <button
+        type="button"
+        onClick={() => onSwitch(false)}
+        className={`${baseTabCls} ${
+          !adultMode
+            ? 'bg-tinder text-white shadow-tinder/40 shadow'
+            : 'text-neutral-600 hover:text-ink'
+        }`}
+      >
+        Discover
+      </button>
+      <button
+        type="button"
+        onClick={() => onSwitch(true)}
+        className={`${baseTabCls} ${
+          adultMode
+            ? 'bg-rose-600 text-white shadow-rose-600/40 shadow'
+            : 'text-neutral-600 hover:text-ink'
+        }`}
+      >
+        18+
+      </button>
     </div>
   );
 }

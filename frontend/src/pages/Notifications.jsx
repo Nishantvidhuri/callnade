@@ -50,15 +50,22 @@ export default function Notifications() {
             >
               <ArrowLeft size={18} strokeWidth={1.8} />
             </button>
-            <div className="min-w-0">
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
-                <Bell size={22} className="text-brand-500" /> Notifications
-              </h1>
-              <p className="text-sm text-neutral-500 mt-0.5">
-                {items.length === 0
-                  ? "You're all caught up"
-                  : `${items.length} ${items.length === 1 ? 'item' : 'items'}`}
-              </p>
+            <div className="min-w-0 flex items-center gap-3">
+              {/* Count chip sits to the LEFT of the title row. Hidden when
+                  the inbox is empty so we don't show "0 items". */}
+              {items.length > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[36px] h-9 px-2.5 text-sm font-bold rounded-full bg-brand-100 text-brand-600 tabular-nums shrink-0">
+                  {items.length}
+                </span>
+              )}
+              <div className="min-w-0">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
+                  <Bell size={22} className="text-brand-500" /> Notifications
+                </h1>
+                {items.length === 0 && (
+                  <p className="text-sm text-neutral-500 mt-0.5">You're all caught up</p>
+                )}
+              </div>
             </div>
           </div>
         </div>

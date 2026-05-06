@@ -13,6 +13,7 @@ const createSchema = z.object({
     description: z.string().max(500).optional(),
     price: z.number().nonnegative(),
     durationMinutes: z.number().int().nonnegative().nullable().optional(),
+    callType: z.enum(['audio', 'video']).optional(),
     active: z.boolean().optional(),
   }),
 });
@@ -23,6 +24,7 @@ const updateSchema = z.object({
     description: z.string().max(500).optional(),
     price: z.number().nonnegative().optional(),
     durationMinutes: z.number().int().nonnegative().nullable().optional(),
+    callType: z.enum(['audio', 'video']).optional(),
     active: z.boolean().optional(),
   }),
 });

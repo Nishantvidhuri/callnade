@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Save, Package as PackageIcon, Edit3, X } from 'lucide-react';
+import { Plus, Trash2, Save, Package as PackageIcon, Edit3, X, Phone, Video } from 'lucide-react';
 import { api } from '../services/api.js';
 
 export default function PackagesManager() {
@@ -7,7 +7,9 @@ export default function PackagesManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null); // null | 'new' | id
-  const [form, setForm] = useState({ title: '', description: '', price: 0, durationMinutes: '' });
+  const [form, setForm] = useState({
+    title: '', description: '', price: 0, durationMinutes: '', callType: 'video',
+  });
   const [saving, setSaving] = useState(false);
 
   const load = () => {
@@ -22,8 +24,14 @@ export default function PackagesManager() {
     load();
   }, []);
 
-  const startNew = () => {
-    setForm({ title: '', description: '', price: 50, durationMinutes: '15' });
+  const startNew = (callType = 'video') => {
+    setForm({
+      title: callType === 'audio' ? 'Audio call' : 'Video call',
+      description: '',
+      price: 50,
+      durationMinutes: '15',
+      callType,
+    });
     setEditing('new');
   };
 
@@ -33,6 +41,7 @@ export default function PackagesManager() {
       description: pkg.description || '',
       price: pkg.price,
       durationMinutes: pkg.durationMinutes ?? '',
+      callType: pkg.callType === 'audio' ? 'audio' : 'video',
     });
     setEditing(pkg.id);
   };
@@ -53,6 +62,7 @@ export default function PackagesManager() {
         price: Number(form.price) || 0,
         durationMinutes:
           form.durationMinutes === '' ? null : Math.max(0, parseInt(form.durationMinutes, 10)),
+        callType: form.callType === 'audio' ? 'audio' : 'video',
       };
       if (editing === 'new') {
         await api.post('/packages', payload);
@@ -85,12 +95,22 @@ export default function PackagesManager() {
           <PackageIcon size={18} className="text-brand-500" /> My packages
         </h2>
         {!editing && (
-          <button
-            onClick={startNew}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full text-white bg-tinder shadow-tinder/30 hover:brightness-110 transition"
-          >
-            <Plus size={14} /> New package
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => startNew('audio')}
+              title="New audio-call package"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full bg-white border border-neutral-200 text-ink hover:bg-neutral-50 transition"
+            >
+              <Phone size={13} /> <span className="hidden sm:inline">Audio package</span>
+            </button>
+            <button
+              onClick={() => startNew('video')}
+              title="New video-call package"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full text-white bg-tinder shadow-tinder/30 hover:brightness-110 transition"
+            >
+              <Video size={13} /> <span className="hidden sm:inline">Video package</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -118,6 +138,33 @@ export default function PackagesManager() {
               <X size={15} />
             </button>
           </div>
+
+          <Field label="Call type">
+            <div className="inline-flex p-1 rounded-full bg-neutral-100 self-start">
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, callType: 'audio' })}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full transition ${
+                  form.callType === 'audio'
+                    ? 'bg-white text-ink shadow-sm'
+                    : 'text-neutral-500 hover:text-ink'
+                }`}
+              >
+                <Phone size={12} /> Audio
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, callType: 'video' })}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full transition ${
+                  form.callType === 'video'
+                    ? 'bg-white text-ink shadow-sm'
+                    : 'text-neutral-500 hover:text-ink'
+                }`}
+              >
+                <Video size={12} /> Video
+              </button>
+            </div>
+          </Field>
 
           <Field label="Title">
             <input
@@ -197,7 +244,19 @@ export default function PackagesManager() {
               className="flex items-start gap-3 p-3 rounded-2xl bg-white border border-neutral-200"
             >
               <div className="min-w-0 flex-1">
-                <p className="font-semibold text-sm">{p.title}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-sm">{p.title}</p>
+                  <span
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-full ${
+                      p.callType === 'audio'
+                        ? 'bg-sky-100 text-sky-700'
+                        : 'bg-brand-100 text-brand-600'
+                    }`}
+                  >
+                    {p.callType === 'audio' ? <Phone size={9} /> : <Video size={9} />}
+                    {p.callType === 'audio' ? 'Audio' : 'Video'}
+                  </span>
+                </div>
                 {p.description && (
                   <p className="text-xs text-neutral-500 mt-0.5 line-clamp-2">{p.description}</p>
                 )}

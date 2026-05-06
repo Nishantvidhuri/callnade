@@ -44,6 +44,10 @@ const userSchema = new mongoose.Schema(
     walletBalance: { type: Number, default: 0, min: 0 },
     earningsBalance: { type: Number, default: 0, min: 0 },
     dateOfBirth: { type: Date, default: null },
+    // Provider-set flag — when true the creator is listed in the "18+"
+    // section instead of the normal Discover tab. Indexed for fast
+    // segmentation queries.
+    isAdult: { type: Boolean, default: false, index: true },
     // Snapshot of the T&C / community-guidelines consent the user accepted
     // at signup. Stored verbatim for legal record. version pins the
     // document revision they actually saw.
