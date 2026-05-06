@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Visit } from '../models/visit.model.js';
 import { User } from '../models/user.model.js';
 
@@ -88,15 +89,71 @@ export async function logVisit({ userId, ip, userAgent, language, timezone, scre
   }
 }
 
+/**
+ * Visit log for the admin panel. Two server-side rules baked in:
+ *   1. Admin users (role: 'admin' OR legacy isAdmin: true) are excluded
+ *      entirely — admins moderating the site shouldn't pollute their
+ *      own analytics view.
+ *   2. Each user appears at most once (collapsed to their most recent
+ *      visit). For signed-in users the dedup key is `userId`; for
+ *      anonymous traffic we fall back to `ip|userAgent` since there's
+ *      nothing else to identify the same visitor by.
+ *
+ * Pagination: the dedup happens BEFORE the cursor cut, so cursor values
+ * are the `_id` of the latest-per-user row. That way successive pages
+ * keep the "one row per user" guarantee.
+ */
 export async function listVisits({ cursor, limit = 50 } = {}) {
-  const filter = {};
-  if (cursor) filter._id = { $lt: cursor };
-  const items = await Visit.find(filter)
-    .sort({ _id: -1 })
-    .limit(limit + 1)
-    .lean();
+  // Pre-fetch admin user IDs so the aggregation can $nin them out.
+  const adminIds = await User.find({
+    $or: [{ role: 'admin' }, { isAdmin: true }],
+  }).distinct('_id');
+
+  const pipeline = [
+    { $match: { userId: { $nin: adminIds } } },
+    // Newest first so $first picks the most recent visit per group.
+    { $sort: { _id: -1 } },
+    {
+      $group: {
+        _id: {
+          $cond: [
+            { $eq: ['$userId', null] },
+            // Anonymous: dedup by IP + UA. Falls back to the visit's own
+            // _id if both are missing so we don't collapse all "unknown"
+            // rows into one.
+            {
+              $concat: [
+                'anon|',
+                { $ifNull: ['$ip', '?'] },
+                '|',
+                { $ifNull: ['$userAgent', '?'] },
+              ],
+            },
+            // Signed-in: dedup by userId.
+            { $concat: ['user|', { $toString: '$userId' }] },
+          ],
+        },
+        latest: { $first: '$$ROOT' },
+      },
+    },
+    { $replaceRoot: { newRoot: '$latest' } },
+    // Re-sort after the group so cursor pagination works on the
+    // deduped stream rather than the raw collection.
+    { $sort: { _id: -1 } },
+  ];
+
+  if (cursor) {
+    // Mongoose accepts string ObjectIds in $lt comparisons inside
+    // aggregation, but only after a cast. Safest to import + use
+    // mongoose.Types.ObjectId.
+    pipeline.push({ $match: { _id: { $lt: new mongoose.Types.ObjectId(cursor) } } });
+  }
+  pipeline.push({ $limit: limit + 1 });
+
+  const items = await Visit.aggregate(pipeline);
   const hasMore = items.length > limit;
   const trimmed = hasMore ? items.slice(0, limit) : items;
+
   return {
     items: trimmed.map((v) => ({
       id: String(v._id),
