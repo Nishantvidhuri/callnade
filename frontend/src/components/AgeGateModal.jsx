@@ -2,35 +2,28 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/auth.store.js';
 import { forceLogVisit } from '../services/visit.js';
 
-const STORAGE_KEY = 'callnade:age-verified';
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function shouldShow() {
-  try {
-    const stamp = localStorage.getItem(STORAGE_KEY);
-    if (!stamp) return true;
-    const t = parseInt(stamp, 10);
-    if (!Number.isFinite(t)) return true;
-    return Date.now() - t > DAY_MS;
-  } catch {
-    return true;
-  }
-}
-
+/**
+ * Anonymous-visitor age gate. Pops up every single time the modal mounts
+ * (i.e. every time an anonymous user lands on a route that mounts this
+ * component — currently just the home page). Logged-in users have
+ * already accepted the gate at signup, so they're never shown it.
+ *
+ * No localStorage caching — the product wants the prompt every time so
+ * anyone bouncing through the home page leaves a visible trail.
+ */
 export default function AgeGateModal() {
   const me = useAuthStore((s) => s.user);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (me) return; // logged-in users have already accepted at signup
-    if (shouldShow()) setOpen(true);
+    if (me) return; // logged-in users skip the gate entirely
+    setOpen(true);
   }, [me]);
 
   if (!open) return null;
 
   const accept = () => {
     forceLogVisit('age-gate/accept');
-    try { localStorage.setItem(STORAGE_KEY, String(Date.now())); } catch {}
     setOpen(false);
   };
 
@@ -68,7 +61,7 @@ export default function AgeGateModal() {
         </div>
 
         <p className="text-[11px] text-neutral-400 mt-5">
-          You won't see this again for 24 hours on this device.
+          You'll be asked to confirm again next time you visit.
         </p>
       </div>
       <style>{`@keyframes pop{from{transform:scale(0.94);opacity:0}to{transform:scale(1);opacity:1}}`}</style>

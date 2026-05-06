@@ -8,15 +8,20 @@ import * as visit from '../controllers/visit.controller.js';
 
 export const router = Router();
 
+// Browser-collected fields are mostly optional and may be `null` when the
+// browser doesn't expose them (e.g. `document.referrer` is null on direct
+// loads). Accept either a string OR null for every field so the client can
+// send a uniform shape — null is normalised to "missing" inside the
+// service layer.
 const logSchema = z.object({
   body: z.object({
-    language: z.string().max(32).optional(),
-    timezone: z.string().max(64).optional(),
-    screen: z.string().max(32).optional(),
-    viewport: z.string().max(32).optional(),
-    dpr: z.number().optional(),
-    referrer: z.string().max(500).optional(),
-    path: z.string().max(200).optional(),
+    language: z.string().max(32).nullable().optional(),
+    timezone: z.string().max(64).nullable().optional(),
+    screen: z.string().max(32).nullable().optional(),
+    viewport: z.string().max(32).nullable().optional(),
+    dpr: z.number().nullable().optional(),
+    referrer: z.string().max(500).nullable().optional(),
+    path: z.string().max(200).nullable().optional(),
   }),
 });
 

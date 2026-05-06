@@ -3,10 +3,9 @@ import { Routes, Route, useLocation, matchPath, Navigate } from 'react-router-do
 import { useAuth, bootstrapAuth } from './hooks/useAuth.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import { useIncomingCalls } from './hooks/useIncomingCalls.js';
-import { logVisitOnce } from './services/visit.js';
+import { forceLogVisit } from './services/visit.js';
 import RequireAuth from './components/RequireAuth.jsx';
 import LoginPromptModal from './components/LoginPromptModal.jsx';
-import AgeGateModal from './components/AgeGateModal.jsx';
 import BecomeCreatorButton from './components/BecomeCreatorButton.jsx';
 
 import Home from './pages/Home.jsx';
@@ -34,8 +33,7 @@ const CHROMELESS = [
 ];
 
 export default function App() {
-  const { isAuthed, user } = useAuth();
-  // isAuthed still used by AgeGateModal mount below.
+  const { user } = useAuth();
   const [booted, setBooted] = useState(false);
   const loc = useLocation();
   const chromeless = CHROMELESS.some((p) => matchPath(p, loc.pathname));
@@ -47,15 +45,15 @@ export default function App() {
     bootstrapAuth().finally(() => setBooted(true));
   }, []);
 
-  // Fire a visit log once we know the user's identity (or that they're
-  // anonymous). Re-fires whenever the auth state flips so each
-  // anonymous → logged-in → anonymous transition logs a fresh row.
-  // We wait for `booted` so the very first log includes the right userId
-  // when the visitor was already signed in via refresh-token cookie.
+  // Fire a visit log on every navigation (and on the very first load
+  // once auth has booted, so the row reflects the right userId when the
+  // visitor was already signed in via refresh-token cookie). One row
+  // per pathname change — the admin gets a full breadcrumb trail
+  // instead of one row per session.
   useEffect(() => {
     if (!booted) return;
-    logVisitOnce(user?._id || null);
-  }, [booted, user?._id]);
+    forceLogVisit();
+  }, [booted, user?._id, loc.pathname]);
 
   if (!booted) {
     return (
@@ -87,7 +85,9 @@ export default function App() {
       </Routes>
 
       {!chromeless && <LoginPromptModal />}
-      {!isAuthed && !chromeless && <AgeGateModal />}
+      {/* AgeGateModal is now mounted inside Home.jsx so it pops up every
+          time an anonymous visitor lands on the home page — the product
+          wants per-visit confirmation, not the previous 24h cache. */}
       {!chromeless && <BecomeCreatorButton />}
     </>
   );

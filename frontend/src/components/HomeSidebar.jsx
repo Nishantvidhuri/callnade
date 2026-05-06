@@ -42,6 +42,25 @@ export default function HomeSidebar({ me, onLogout }) {
       </nav>
 
       <div className="p-3 border-t border-white/15 space-y-2">
+        {!me && (
+          // Guest sidebar footer: simple Log in / Sign up CTAs that match
+          // the mobile top bar so the affordance is consistent across
+          // viewports.
+          <div className="grid grid-cols-2 gap-2">
+            <Link
+              to="/login"
+              className="px-3 py-2 text-xs font-semibold text-center rounded-full bg-white/15 hover:bg-white/25 transition"
+            >
+              Log in
+            </Link>
+            <Link
+              to="/signup"
+              className="px-3 py-2 text-xs font-semibold text-center rounded-full bg-white text-brand-600 hover:bg-white/90 transition"
+            >
+              Sign up
+            </Link>
+          </div>
+        )}
         {me && (
           <>
             <div className="flex items-center justify-between px-1 text-white">

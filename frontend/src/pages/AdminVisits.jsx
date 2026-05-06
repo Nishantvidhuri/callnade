@@ -145,7 +145,9 @@ export default function AdminVisits() {
                             @{v.username}
                           </Link>
                         ) : (
-                          <span className="text-neutral-500">Anonymous</span>
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[11px] font-bold uppercase tracking-wide">
+                            Anonymous
+                          </span>
                         )}
                       </p>
                       <span className="text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700">

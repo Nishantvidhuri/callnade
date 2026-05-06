@@ -37,16 +37,34 @@ export default function MobileTopBar() {
           <Search size={18} strokeWidth={1.8} />
         </button>
 
-        {me && <NotificationDropdown />}
-
-        {me && (
-          <Link
-            to="/settings"
-            aria-label="Settings"
-            className="w-10 h-10 rounded-full grid place-items-center bg-white/80 backdrop-blur-md border border-white/80 text-neutral-700 hover:bg-white hover:text-ink shadow-sm transition shrink-0"
-          >
-            <SettingsIcon size={18} strokeWidth={1.8} />
-          </Link>
+        {me ? (
+          <>
+            <NotificationDropdown />
+            <Link
+              to="/settings"
+              aria-label="Settings"
+              className="w-10 h-10 rounded-full grid place-items-center bg-white/80 backdrop-blur-md border border-white/80 text-neutral-700 hover:bg-white hover:text-ink shadow-sm transition shrink-0"
+            >
+              <SettingsIcon size={18} strokeWidth={1.8} />
+            </Link>
+          </>
+        ) : (
+          // Anonymous visitors get an inline login affordance instead of
+          // the bell/settings cluster — quick path off any page into auth.
+          <>
+            <Link
+              to="/login"
+              className="px-3.5 h-10 inline-flex items-center text-xs font-semibold rounded-full bg-white/80 backdrop-blur-md border border-white/80 text-neutral-800 hover:bg-white shadow-sm transition shrink-0"
+            >
+              Log in
+            </Link>
+            <Link
+              to="/signup"
+              className="px-3.5 h-10 inline-flex items-center text-xs font-semibold rounded-full bg-tinder text-white shadow-tinder/40 shadow-md hover:brightness-110 transition shrink-0"
+            >
+              Sign up
+            </Link>
+          </>
         )}
       </div>
     </div>

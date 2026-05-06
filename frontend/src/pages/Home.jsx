@@ -8,6 +8,7 @@ import HomeBottomBar from '../components/HomeBottomBar.jsx';
 import MobileTopBar from '../components/MobileTopBar.jsx';
 import UserCard from '../components/UserCard.jsx';
 import AdultGateModal from '../components/AdultGateModal.jsx';
+import AgeGateModal from '../components/AgeGateModal.jsx';
 
 const PATH_TO_TAB = {
   '/popular': 'popular',
@@ -169,18 +170,25 @@ export default function Home() {
 
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-neutral-950 text-ink">
-      {me && (
-        <HomeSidebar
-          me={me}
-          onLogout={async () => {
-            try { await api.post('/auth/logout'); } catch {}
-            useAuthStore.getState().clear();
-            window.location.href = '/login';
-          }}
-        />
-      )}
+      {/* Sidebar shows for guests too — internally it just renders the
+          brand + Home link + Log in / Sign up footer when `me` is null,
+          which gives anonymous desktop visitors the same top-left logo
+          you see on mobile. */}
+      <HomeSidebar
+        me={me}
+        onLogout={async () => {
+          try { await api.post('/auth/logout'); } catch {}
+          useAuthStore.getState().clear();
+          window.location.href = '/login';
+        }}
+      />
 
-      <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#fff5f9] pb-16 lg:pb-0">
+
+      <main
+        className={`flex-1 flex flex-col min-w-0 min-h-0 bg-[#fff5f9] lg:pb-0 ${
+          me ? 'pb-16' : ''
+        }`}
+      >
         <MobileTopBar />
         <div className="hidden lg:block px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-2 shrink-0">
           <HomeTopBar query={query} onQueryChange={setQuery} />
@@ -259,6 +267,11 @@ export default function Home() {
       </main>
 
       <HomeBottomBar />
+
+      {/* 18+ age-gate for anonymous visitors. Lives on the home page so
+          it pops up on every fresh entry to "/" — no localStorage cache.
+          Logged-in users skip it (already accepted at signup). */}
+      {!me && <AgeGateModal />}
 
       {/* 18+ gate modal — disabled along with the DiscoverTabs above. */}
       {/*
