@@ -1,13 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Routes, Route, useLocation, matchPath } from 'react-router-dom';
+import { Routes, Route, useLocation, matchPath, Navigate } from 'react-router-dom';
 import { useAuth, bootstrapAuth } from './hooks/useAuth.js';
-import { useChatSocket } from './hooks/useChatSocket.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import { useIncomingCalls } from './hooks/useIncomingCalls.js';
 import { logVisitOnce } from './services/visit.js';
 import RequireAuth from './components/RequireAuth.jsx';
-import ChatFab from './components/ChatFab.jsx';
-import ChatDrawer from './components/ChatDrawer.jsx';
 import LoginPromptModal from './components/LoginPromptModal.jsx';
 import AgeGateModal from './components/AgeGateModal.jsx';
 import BecomeCreatorButton from './components/BecomeCreatorButton.jsx';
@@ -16,7 +13,9 @@ import Home from './pages/Home.jsx';
 import Login from './pages/Login.jsx';
 import Signup from './pages/Signup.jsx';
 import Profile from './pages/Profile.jsx';
-import Settings from './pages/Settings.jsx';
+// Settings page merged into Profile — keep the import path resolvable
+// in case anything else references it, but the route below redirects to
+// /u/{me.username} so users land on the unified profile + settings view.
 import Calls from './pages/Calls.jsx';
 import Notifications from './pages/Notifications.jsx';
 import Admin from './pages/Admin.jsx';
@@ -36,11 +35,11 @@ const CHROMELESS = [
 
 export default function App() {
   const { isAuthed, user } = useAuth();
+  // isAuthed still used by AgeGateModal mount below.
   const [booted, setBooted] = useState(false);
   const loc = useLocation();
   const chromeless = CHROMELESS.some((p) => matchPath(p, loc.pathname));
 
-  useChatSocket();
   useNotifications();
   useIncomingCalls();
 
@@ -73,13 +72,12 @@ export default function App() {
         <Route path="/popular" element={<Home />} />
         <Route path="/liked" element={<RequireAuth><Home /></RequireAuth>} />
         <Route path="/requests" element={<RequireAuth><Home /></RequireAuth>} />
-        <Route path="/chat" element={<RequireAuth><Home /></RequireAuth>} />
         <Route path="/u/:username" element={<RequireAuth><Profile /></RequireAuth>} />
         <Route path="/calls" element={<RequireAuth><Calls /></RequireAuth>} />
         <Route path="/notifications" element={<RequireAuth><Notifications /></RequireAuth>} />
         <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
         <Route path="/admin/visits" element={<RequireAuth><AdminVisits /></RequireAuth>} />
-        <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+        <Route path="/settings" element={<RequireAuth><SettingsRedirect /></RequireAuth>} />
         <Route path="/call/:peerId" element={<RequireAuth><Call /></RequireAuth>} />
         <Route path="/call/incoming/:callId" element={<RequireAuth><IncomingCall /></RequireAuth>} />
         <Route path="/admin/call/:callId/spectate" element={<RequireAuth><AdminSpectate /></RequireAuth>} />
@@ -88,16 +86,20 @@ export default function App() {
         <Route path="*" element={<NotFound />} />
       </Routes>
 
-      {isAuthed && !chromeless && (
-        <>
-          <ChatFab />
-          <ChatDrawer />
-        </>
-      )}
-
       {!chromeless && <LoginPromptModal />}
       {!isAuthed && !chromeless && <AgeGateModal />}
       {!chromeless && <BecomeCreatorButton />}
     </>
   );
+}
+
+/**
+ * /settings is now an alias of /u/<my-username>. The profile page hosts
+ * the editable form + packages manager inline when the viewer is the
+ * owner. This component just bounces the browser to the right URL.
+ */
+function SettingsRedirect() {
+  const { user } = useAuth();
+  if (!user?.username) return <Navigate to="/login" replace />;
+  return <Navigate to={`/u/${user.username}`} replace />;
 }

@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/auth.store.js';
 import { disconnectSocket } from '../services/socket.js';
 import HomeSidebar from '../components/HomeSidebar.jsx';
 import HomeBottomBar from '../components/HomeBottomBar.jsx';
+import MobileTopBar from '../components/MobileTopBar.jsx';
 import PackagesManager from '../components/PackagesManager.jsx';
 import { fmtCredits } from '../utils/formatCredits.js';
 
@@ -77,7 +78,9 @@ export default function Settings() {
     <div className="h-[100dvh] flex overflow-hidden bg-neutral-950 text-ink">
       <HomeSidebar me={me} onLogout={handleLogout} />
 
-      <main className="flex-1 min-h-0 overflow-y-auto bg-[#fff5f9]">
+      <main className="flex-1 flex flex-col min-h-0 bg-[#fff5f9]">
+        <MobileTopBar />
+        <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24 lg:pb-8 space-y-6">
           <button
             onClick={() => nav(-1)}
@@ -332,6 +335,7 @@ export default function Settings() {
               Need to delete your account? Contact support.
             </p>
           </div>
+        </div>
         </div>
       </main>
       <HomeBottomBar />

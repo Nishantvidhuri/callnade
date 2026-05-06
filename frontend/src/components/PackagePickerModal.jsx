@@ -4,11 +4,11 @@ import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { fmtCredits } from '../utils/formatCredits.js';
 
-export default function PackagePickerModal({ peer, open, onClose, onStart }) {
+export default function PackagePickerModal({ peer, open, onClose, onStart, callTypeFilter }) {
   const me = useAuthStore((s) => s.user);
   const balance = me?.walletBalance ?? 0;
 
-  const [packages, setPackages] = useState([]);
+  const [allPackages, setAllPackages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -18,20 +18,43 @@ export default function PackagePickerModal({ peer, open, onClose, onStart }) {
     setError(null);
     api
       .get(`/users/${peer.username}`)
-      .then((r) => setPackages(r.data?.packages || []))
+      .then((r) => setAllPackages(r.data?.packages || []))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [open, peer?.username]);
 
   if (!open) return null;
 
+  // Optionally filter by call type. Falls back to "video" for legacy
+  // packages that don't have callType set yet.
+  const packages = callTypeFilter
+    ? allPackages.filter((p) => (p.callType || 'video') === callTypeFilter)
+    : allPackages;
+
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl text-left relative animate-[pop_150ms_ease-out] max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200">
-          <div className="min-w-0">
-            <p className="text-sm text-neutral-500">Start a call with</p>
-            <p className="font-bold text-base truncate">@{peer?.username}</p>
+          <div className="min-w-0 flex items-center gap-3">
+            {callTypeFilter && (
+              <span
+                className={`w-9 h-9 rounded-full grid place-items-center shrink-0 text-white ${
+                  callTypeFilter === 'audio' ? 'bg-sky-500' : 'bg-tinder'
+                }`}
+              >
+                {callTypeFilter === 'audio' ? <Phone size={16} /> : <Video size={16} />}
+              </span>
+            )}
+            <div className="min-w-0">
+              <p className="text-sm text-neutral-500">
+                {callTypeFilter === 'audio'
+                  ? 'Pick an audio call package'
+                  : callTypeFilter === 'video'
+                    ? 'Pick a video call package'
+                    : 'Start a call with'}
+              </p>
+              <p className="font-bold text-base truncate">@{peer?.username}</p>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -50,16 +73,19 @@ export default function PackagePickerModal({ peer, open, onClose, onStart }) {
           ) : packages.length === 0 ? (
             <div className="text-center py-6">
               <p className="text-sm text-neutral-500 mb-4">
-                This user hasn't published any packages yet.
+                {callTypeFilter
+                  ? `This user hasn't published any ${callTypeFilter} call packages yet.`
+                  : "This user hasn't published any packages yet."}
               </p>
               <button
                 onClick={() => {
-                  onStart(null);
+                  onStart(null, callTypeFilter || 'video');
                   onClose();
                 }}
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold rounded-full text-white bg-tinder shadow-tinder/30 hover:brightness-110 transition"
               >
-                <Video size={14} /> Start free call
+                {callTypeFilter === 'audio' ? <Phone size={14} /> : <Video size={14} />}
+                Start free {callTypeFilter || 'video'} call
               </button>
             </div>
           ) : (

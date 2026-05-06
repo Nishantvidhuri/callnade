@@ -7,6 +7,7 @@ import { api } from '../services/api.js';
 import { getSocket } from '../services/socket.js';
 import HomeSidebar from '../components/HomeSidebar.jsx';
 import HomeBottomBar from '../components/HomeBottomBar.jsx';
+import MobileTopBar from '../components/MobileTopBar.jsx';
 import { enterFullscreenOnMobile } from '../utils/fullscreen.js';
 
 export default function Calls() {
@@ -67,6 +68,7 @@ export default function Calls() {
       />
 
       <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#fff5f9]">
+        <MobileTopBar />
         <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-4 shrink-0">
           <div className="flex items-center gap-3">
             <button

@@ -2,20 +2,16 @@ import { Link, NavLink } from 'react-router-dom';
 import {
   Home as HomeIcon,
   BellRing,
-  MessageSquare,
   Video,
   Shield,
   User as UserIcon,
-  Settings,
   LogOut,
   Wallet,
 } from 'lucide-react';
-import { useChatStore } from '../stores/chat.store.js';
 import { useIncomingCallsStore } from '../stores/incomingCalls.store.js';
 import { fmtCredits } from '../utils/formatCredits.js';
 
 export default function HomeSidebar({ me, onLogout }) {
-  const totalUnread = useChatStore((s) => s.totalUnread);
   const ringingCount = useIncomingCallsStore((s) => s.items.length);
 
   return (
@@ -30,11 +26,18 @@ export default function HomeSidebar({ me, onLogout }) {
 
       <nav className="flex flex-col gap-1 px-3 flex-1">
         <SidebarLink to="/" icon={HomeIcon} end>Home</SidebarLink>
-        <SidebarLink to="/chat" icon={MessageSquare} badge={totalUnread}>Chat</SidebarLink>
-        <SidebarLink to="/calls" icon={Video} badge={ringingCount}>Video calls</SidebarLink>
-        <SidebarLink to="/requests" icon={BellRing}>Subscribers</SidebarLink>
+        {/* Video calls inbox is for creators only — that's where ringing
+            calls land. Subscribers initiate from a creator's profile;
+            admins use /admin/calls/active for moderation. */}
+        {me?.role === 'provider' && (
+          <SidebarLink to="/calls" icon={Video} badge={ringingCount}>Video calls</SidebarLink>
+        )}
+        {/* "Subscribers" tab is the incoming-follower-requests view —
+            creators only. */}
+        {me?.role === 'provider' && (
+          <SidebarLink to="/requests" icon={BellRing}>Subscribers</SidebarLink>
+        )}
         {me && <SidebarLink to={`/u/${me.username}`} icon={UserIcon}>Profile</SidebarLink>}
-        <SidebarLink to="/settings" icon={Settings}>Settings</SidebarLink>
         {(me?.role === 'admin' || me?.isAdmin) && <SidebarLink to="/admin" icon={Shield}>Admin</SidebarLink>}
       </nav>
 

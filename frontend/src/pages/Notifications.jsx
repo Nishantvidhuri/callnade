@@ -7,6 +7,7 @@ import { useNotificationStore } from '../stores/notification.store.js';
 import { disconnectSocket } from '../services/socket.js';
 import HomeSidebar from '../components/HomeSidebar.jsx';
 import HomeBottomBar from '../components/HomeBottomBar.jsx';
+import MobileTopBar from '../components/MobileTopBar.jsx';
 
 export default function Notifications() {
   const me = useAuthStore((s) => s.user);
@@ -41,6 +42,7 @@ export default function Notifications() {
       <HomeSidebar me={me} onLogout={onLogout} />
 
       <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#fff5f9]">
+        <MobileTopBar />
         <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-4 shrink-0">
           <div className="flex items-center gap-3">
             <button

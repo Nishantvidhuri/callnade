@@ -5,15 +5,14 @@ import { useAuthStore } from '../stores/auth.store.js';
 import HomeSidebar from '../components/HomeSidebar.jsx';
 import HomeTopBar from '../components/HomeTopBar.jsx';
 import HomeBottomBar from '../components/HomeBottomBar.jsx';
+import MobileTopBar from '../components/MobileTopBar.jsx';
 import UserCard from '../components/UserCard.jsx';
-import ChatView from '../components/ChatView.jsx';
 import AdultGateModal from '../components/AdultGateModal.jsx';
 
 const PATH_TO_TAB = {
   '/popular': 'popular',
   '/liked': 'following',
   '/requests': 'requests',
-  '/chat': 'chat',
 };
 
 export default function Home() {
@@ -168,8 +167,6 @@ export default function Home() {
 
   const showSearch = !!debouncedQuery;
 
-  const isChat = tab === 'chat' && !showSearch;
-
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-neutral-950 text-ink">
       {me && (
@@ -184,15 +181,12 @@ export default function Home() {
       )}
 
       <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#fff5f9] pb-16 lg:pb-0">
-        {!isChat && (
-          <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-2 shrink-0">
-            <HomeTopBar query={query} onQueryChange={setQuery} />
-          </div>
-        )}
+        <MobileTopBar />
+        <div className="hidden lg:block px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-2 shrink-0">
+          <HomeTopBar query={query} onQueryChange={setQuery} />
+        </div>
 
-        {isChat ? (
-          <ChatView />
-        ) : (
+        {(
           <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-8">{/* main's pb-16 reserves space for the mobile bottom bar */}
             {error && (
               <div className="px-4 py-2.5 mb-4 bg-rose-50 border border-rose-100 text-rose-700 text-sm rounded-lg">

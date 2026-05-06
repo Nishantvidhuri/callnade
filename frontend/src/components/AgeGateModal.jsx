@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/auth.store.js';
+import { forceLogVisit } from '../services/visit.js';
 
 const STORAGE_KEY = 'callnade:age-verified';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -28,11 +29,13 @@ export default function AgeGateModal() {
   if (!open) return null;
 
   const accept = () => {
+    forceLogVisit('age-gate/accept');
     try { localStorage.setItem(STORAGE_KEY, String(Date.now())); } catch {}
     setOpen(false);
   };
 
   const exit = () => {
+    forceLogVisit('age-gate/exit');
     window.location.replace('https://www.google.com');
   };
 
