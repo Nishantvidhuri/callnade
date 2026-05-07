@@ -186,6 +186,12 @@ export default function Admin() {
               <p className="text-sm text-neutral-500 mt-0.5">All accounts on callnade</p>
             </div>
             <Link
+              to="/admin/wallet-requests"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition shrink-0"
+            >
+              <Wallet size={13} /> <span className="hidden sm:inline">Wallet</span>
+            </Link>
+            <Link
               to="/admin/visits"
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition shrink-0"
             >

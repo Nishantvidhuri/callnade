@@ -27,8 +27,26 @@ export default function Home() {
     if (next !== tab) setTabState(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.pathname]);
-  const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  // Initialize search from `?q=` so the mobile top bar (which navigates
+  // here with that param) can drive the grid. Keep this state hook
+  // synced whenever the URL changes — typing in the top bar replaces
+  // the URL with the new query, and clearing it removes the param.
+  const initialQuery = (() => {
+    try { return new URLSearchParams(loc.search).get('q') || ''; }
+    catch { return ''; }
+  })();
+  const [query, setQuery] = useState(initialQuery);
+  const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
+
+  useEffect(() => {
+    const next = (() => {
+      try { return new URLSearchParams(loc.search).get('q') || ''; }
+      catch { return ''; }
+    })();
+    if (next !== query) setQuery(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.search]);
   const [items, setItems] = useState([]);
   const [onlineItems, setOnlineItems] = useState([]);
   const [cursor, setCursor] = useState(null);

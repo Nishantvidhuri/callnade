@@ -7,6 +7,7 @@ import {
   User as UserIcon,
   LogOut,
   Wallet,
+  Receipt,
 } from 'lucide-react';
 import { useIncomingCallsStore } from '../stores/incomingCalls.store.js';
 import { fmtCredits } from '../utils/formatCredits.js';
@@ -38,7 +39,13 @@ export default function HomeSidebar({ me, onLogout }) {
           <SidebarLink to="/requests" icon={BellRing}>Subscribers</SidebarLink>
         )}
         {me && <SidebarLink to={`/u/${me.username}`} icon={UserIcon}>Profile</SidebarLink>}
-        {(me?.role === 'admin' || me?.isAdmin) && <SidebarLink to="/admin" icon={Shield}>Admin</SidebarLink>}
+        {me && <SidebarLink to="/billing" icon={Receipt}>Billing</SidebarLink>}
+        {(me?.role === 'admin' || me?.isAdmin) && (
+          <>
+            <SidebarLink to="/admin" icon={Shield}>Admin</SidebarLink>
+            <SidebarLink to="/admin/wallet-requests" icon={Wallet}>Wallet requests</SidebarLink>
+          </>
+        )}
       </nav>
 
       <div className="p-3 border-t border-white/15 space-y-2">
@@ -63,7 +70,11 @@ export default function HomeSidebar({ me, onLogout }) {
         )}
         {me && (
           <>
-            <div className="flex items-center justify-between px-1 text-white">
+            <Link
+              to="/billing"
+              className="flex items-center justify-between px-2 py-1.5 -mx-1 rounded-lg text-white hover:bg-white/15 transition"
+              title="Open billing"
+            >
               <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide opacity-80">
                 <Wallet size={13} strokeWidth={2} />
                 {me.role === 'provider' ? 'Earnings' : 'Wallet'}
@@ -72,7 +83,7 @@ export default function HomeSidebar({ me, onLogout }) {
                 {fmtCredits(me.role === 'provider' ? me.earningsBalance : me.walletBalance)}{' '}
                 <span className="text-[10px] opacity-70 font-medium">credits</span>
               </span>
-            </div>
+            </Link>
             <div className="flex items-center gap-2.5 p-2 bg-white/15 rounded-xl">
               <Link to={`/u/${me.username}`} className="flex items-center gap-2.5 min-w-0 flex-1">
                 {me.avatarUrl ? (

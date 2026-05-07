@@ -1,4 +1,5 @@
 import * as adminService from '../services/admin.service.js';
+import * as walletService from '../services/wallet.service.js';
 import { notFound } from '../utils/HttpError.js';
 
 export async function listUsers(req, res) {
@@ -58,4 +59,53 @@ export async function adjustEarnings(req, res) {
 
 export async function setRole(req, res) {
   res.json(await adminService.setRole(req.user.id, req.params.userId, req.body.role));
+}
+
+/* Wallet-request management. */
+
+export async function listWalletRequests(req, res) {
+  res.json(await walletService.adminListWalletRequests(req.query));
+}
+
+export async function walletStats(_req, res) {
+  res.json(await walletService.adminWalletStats());
+}
+
+export async function approveTopup(req, res) {
+  res.json(
+    await walletService.adminApproveTopup(req.user.id, req.params.requestId, {
+      adminNote: req.body?.adminNote,
+    }),
+  );
+}
+
+export async function approveWithdraw(req, res) {
+  res.json(
+    await walletService.adminApproveWithdraw(req.user.id, req.params.requestId, {
+      adminNote: req.body?.adminNote,
+    }),
+  );
+}
+
+export async function rejectWalletRequest(req, res) {
+  res.json(
+    await walletService.adminRejectWalletRequest(req.user.id, req.params.requestId, {
+      adminNote: req.body?.adminNote,
+    }),
+  );
+}
+
+export async function withdrawQr(req, res) {
+  const out = await walletService.adminGetWithdrawQr(req.params.requestId);
+  if (!out) throw notFound('QR not found');
+  // R2 path: 302 to the public URL so the browser fetches it directly.
+  // Saves us streaming bytes through the API.
+  if (out.redirectUrl) {
+    res.setHeader('Cache-Control', 'private, no-cache');
+    return res.redirect(302, out.redirectUrl);
+  }
+  res.setHeader('Content-Type', out.contentType);
+  res.setHeader('Cache-Control', 'private, no-cache');
+  res.setHeader('Content-Length', out.buffer.length);
+  res.end(out.buffer);
 }

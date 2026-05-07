@@ -94,6 +94,7 @@ async function endCall(callId, reason = 'hangup') {
       packageId: c.packageId || null,
       perMinuteRate: c.billRate || 0,
       totalBilled: c.totalBilled || 0,
+      totalEarned: c.totalEarned || 0,
       startedAt: c.startedAt,
       endedAt,
       durationSec,

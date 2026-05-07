@@ -58,8 +58,8 @@ export default function HomeTopBar({ query, onQueryChange }) {
           : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100';
         return (
           <Link
-            to="/settings"
-            title={`${fmtCredits(value)} ${isProvider ? 'earnings' : 'credits'}`}
+            to="/billing"
+            title={`${fmtCredits(value)} ${isProvider ? 'earnings' : 'credits'} — open billing`}
             className={`hidden sm:inline-flex items-center gap-1.5 h-10 sm:h-11 px-3 rounded-full border text-sm font-bold tabular-nums shadow-sm transition shrink-0 ${cls}`}
           >
             <Wallet size={14} strokeWidth={2.2} />

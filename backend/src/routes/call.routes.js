@@ -7,3 +7,4 @@ export const router = Router();
 
 router.post('/ice-config', requireAuth, asyncHandler(call.ice));
 router.get('/history', requireAuth, asyncHandler(call.history));
+router.get('/transactions', requireAuth, asyncHandler(call.transactions));

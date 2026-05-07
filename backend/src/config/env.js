@@ -25,6 +25,13 @@ const schema = z.object({
   TURN_SECRET: z.string().default(''),
   TURN_HOST: z.string().default(''),
   TURN_TTL_SEC: z.coerce.number().default(600),
+
+  // Razorpay payment-gateway credentials. Empty in dev / when wallet
+  // top-ups are admin-mediated; required for the live /wallet/order
+  // and /wallet/verify endpoints to work. The KEY_SECRET MUST never
+  // ship to the frontend — only KEY_ID is exposed there.
+  RAZORPAY_KEY_ID: z.string().default(''),
+  RAZORPAY_KEY_SECRET: z.string().default(''),
 });
 
 const parsed = schema.safeParse(process.env);

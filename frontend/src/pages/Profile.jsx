@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Video, Phone, Camera, Lock, BellRing, BellPlus, Check,
-  Save, LogOut, Edit3,
+  Save, LogOut, Edit3, Receipt,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
@@ -275,6 +275,12 @@ export default function Profile() {
             >
               <Edit3 size={14} /> {editing ? 'Close edit' : 'Edit profile'}
             </button>
+            <Link
+              to="/billing"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-neutral-200 text-neutral-700 hover:bg-neutral-50 transition"
+            >
+              <Receipt size={14} /> Billing
+            </Link>
             <button
               type="button"
               onClick={handleLogout}

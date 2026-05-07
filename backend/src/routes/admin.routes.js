@@ -42,3 +42,24 @@ router.post('/users/:userId/wallet', validate(walletSchema), asyncHandler(admin.
 router.post('/users/:userId/earnings', validate(walletSchema), asyncHandler(admin.adjustEarnings));
 router.post('/users/:userId/role', validate(roleSchema), asyncHandler(admin.setRole));
 router.get('/calls/active', asyncHandler(admin.activeCalls));
+
+// Wallet-request review queue. Admin sees both top-ups (incoming
+// money) and withdrawals (outgoing money) and approves/rejects.
+const walletRequestsListSchema = z.object({
+  query: z.object({
+    type: z.enum(['topup', 'withdraw']).optional(),
+    status: z.enum(['pending', 'approved', 'rejected']).optional(),
+    cursor: z.string().optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+  }),
+});
+const walletRequestActionSchema = z.object({
+  body: z.object({ adminNote: z.string().max(500).optional() }),
+});
+
+router.get('/wallet-requests', validate(walletRequestsListSchema), asyncHandler(admin.listWalletRequests));
+router.get('/wallet-stats', asyncHandler(admin.walletStats));
+router.post('/wallet-requests/:requestId/approve-topup', validate(walletRequestActionSchema), asyncHandler(admin.approveTopup));
+router.post('/wallet-requests/:requestId/approve-withdraw', validate(walletRequestActionSchema), asyncHandler(admin.approveWithdraw));
+router.post('/wallet-requests/:requestId/reject', validate(walletRequestActionSchema), asyncHandler(admin.rejectWalletRequest));
+router.get('/wallet-requests/:requestId/qr', asyncHandler(admin.withdrawQr));
