@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Search, Shield, Ban, RotateCcw, Video, Wallet, Plus, Minus, FileText, Trash2 } from 'lucide-react';
+import { Search, Shield, Ban, RotateCcw, Video, Wallet, FileText, Trash2, Check, X } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import HomeSidebar from '../components/HomeSidebar.jsx';
@@ -171,32 +171,27 @@ export default function Admin() {
       <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#fff5f9]">
         <MobileTopBar />
         <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-4 shrink-0">
-          <div className="flex items-center gap-3 mb-3">
-            <button
-              onClick={() => nav('/')}
-              className="lg:hidden w-9 h-9 grid place-items-center rounded-full bg-white/80 backdrop-blur-md border border-white/80 text-neutral-700 hover:bg-white"
-              aria-label="Back"
-            >
-              <ArrowLeft size={18} strokeWidth={1.8} />
-            </button>
+          <div className="flex items-start gap-3 mb-3 flex-wrap sm:flex-nowrap">
             <div className="min-w-0 flex-1">
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
                 <Shield size={22} className="text-brand-500" /> Admin
               </h1>
               <p className="text-sm text-neutral-500 mt-0.5">All accounts on callnade</p>
             </div>
-            <Link
-              to="/admin/wallet-requests"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition shrink-0"
-            >
-              <Wallet size={13} /> <span className="hidden sm:inline">Wallet</span>
-            </Link>
-            <Link
-              to="/admin/visits"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition shrink-0"
-            >
-              📊 <span className="hidden sm:inline">Visits</span>
-            </Link>
+            <div className="flex items-center gap-2 shrink-0">
+              <Link
+                to="/admin/wallet-requests"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition"
+              >
+                <Wallet size={13} /> <span className="hidden sm:inline">Wallet</span>
+              </Link>
+              <Link
+                to="/admin/visits"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition"
+              >
+                📊 <span className="hidden sm:inline">Visits</span>
+              </Link>
+            </div>
           </div>
           <div className="relative max-w-md">
             <Search
@@ -244,8 +239,14 @@ export default function Admin() {
           ) : (
             <ul className="bg-white rounded-2xl border border-neutral-200 divide-y divide-neutral-100 overflow-hidden">
               {items.map((u) => (
-                <li key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-neutral-50">
-                  <Link to={`/u/${u.username}`} className="flex items-center gap-3 min-w-0 flex-1">
+                <li
+                  key={u.id}
+                  className="flex flex-col gap-3 px-4 py-3.5 hover:bg-neutral-50 lg:flex-row lg:items-center"
+                >
+                  <Link
+                    to={`/u/${u.username}`}
+                    className="flex items-center gap-3 min-w-0 flex-1"
+                  >
                     <div className="relative shrink-0">
                       {u.avatarUrl ? (
                         <img src={u.avatarUrl} alt="" className={`w-11 h-11 rounded-full object-cover ${u.banned || u.deletedAt ? 'opacity-40 grayscale' : ''}`} />
@@ -315,90 +316,95 @@ export default function Admin() {
                     </div>
                   </Link>
 
-                  <div className="flex flex-col gap-1.5 shrink-0">
-                    {/* Providers earn, they don't spend — hide their wallet
-                        control. Users (and admins) keep the wallet. */}
-                    {u.role !== 'provider' && (
-                      <WalletControl
-                        icon="wallet"
-                        label="Wallet"
-                        value={u.walletBalance ?? 0}
-                        onChange={(delta) => adjustWallet(u.id, delta)}
-                      />
+                  {/* Action cluster. On mobile this drops below the
+                      user info as a wrapped row of compact controls; on
+                      lg+ it stays inline on the right. */}
+                  <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      {/* Providers earn, they don't spend — hide their wallet
+                          control. Users (and admins) keep the wallet. */}
+                      {u.role !== 'provider' && (
+                        <WalletControl
+                          icon="wallet"
+                          label="Wallet"
+                          value={u.walletBalance ?? 0}
+                          onChange={(delta) => adjustWallet(u.id, delta)}
+                        />
+                      )}
+                      {(u.role === 'provider' || u.role === 'admin') && (
+                        <WalletControl
+                          icon="earnings"
+                          label="Earnings"
+                          value={u.earningsBalance ?? 0}
+                          onChange={(delta) => adjustEarnings(u.id, delta)}
+                        />
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setDetailUserId(u.id)}
+                      title="View verification photo & consent record"
+                      aria-label="View user details"
+                      className="w-9 h-9 grid place-items-center rounded-full border border-neutral-200 text-neutral-600 hover:text-ink hover:bg-neutral-50 transition shrink-0"
+                    >
+                      <FileText size={14} />
+                    </button>
+
+                    {u.id !== me?._id && (
+                      <select
+                        value={u.role || 'user'}
+                        onChange={(e) => setRole(u.id, e.target.value)}
+                        className="text-xs rounded-lg border border-neutral-200 px-2 py-1.5 shrink-0 bg-white"
+                      >
+                        <option value="user">User</option>
+                        <option value="provider">Provider</option>
+                        <option value="admin">Admin</option>
+                      </select>
                     )}
-                    {(u.role === 'provider' || u.role === 'admin') && (
-                      <WalletControl
-                        icon="earnings"
-                        label="Earnings"
-                        value={u.earningsBalance ?? 0}
-                        onChange={(delta) => adjustEarnings(u.id, delta)}
-                      />
+
+                    {u.id !== me?._id && u.role !== 'admin' && (
+                      u.banned ? (
+                        <button
+                          onClick={() => unban(u.id)}
+                          disabled={busy === u.id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-neutral-200 hover:bg-neutral-50 disabled:opacity-50 transition shrink-0"
+                        >
+                          <RotateCcw size={13} /> Unban
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => ban(u.id)}
+                          disabled={busy === u.id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition shrink-0"
+                        >
+                          <Ban size={13} /> Ban
+                        </button>
+                      )
+                    )}
+
+                    {u.id !== me?._id && u.role !== 'admin' && (
+                      u.deletedAt ? (
+                        <button
+                          onClick={() => restore(u.id)}
+                          disabled={busy === u.id}
+                          title={`Deleted ${fmt(u.deletedAt)}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 transition shrink-0"
+                        >
+                          <RotateCcw size={13} /> Restore
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => softDelete(u.id, u.username)}
+                          disabled={busy === u.id}
+                          title="Soft-delete this account (hides from public, restorable)"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-neutral-200 text-neutral-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 disabled:opacity-50 transition shrink-0"
+                        >
+                          <Trash2 size={13} /> Delete
+                        </button>
+                      )
                     )}
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setDetailUserId(u.id)}
-                    title="View verification photo & consent record"
-                    aria-label="View user details"
-                    className="w-9 h-9 grid place-items-center rounded-full border border-neutral-200 text-neutral-600 hover:text-ink hover:bg-neutral-50 transition shrink-0"
-                  >
-                    <FileText size={14} />
-                  </button>
-
-                  {u.id !== me?._id && (
-                    <select
-                      value={u.role || 'user'}
-                      onChange={(e) => setRole(u.id, e.target.value)}
-                      className="text-xs rounded-lg border border-neutral-200 px-2 py-1.5 shrink-0 bg-white"
-                    >
-                      <option value="user">User</option>
-                      <option value="provider">Provider</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  )}
-
-                  {u.id !== me?._id && u.role !== 'admin' && (
-                    u.banned ? (
-                      <button
-                        onClick={() => unban(u.id)}
-                        disabled={busy === u.id}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-neutral-200 hover:bg-neutral-50 disabled:opacity-50 transition shrink-0"
-                      >
-                        <RotateCcw size={13} /> Unban
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => ban(u.id)}
-                        disabled={busy === u.id}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition shrink-0"
-                      >
-                        <Ban size={13} /> Ban
-                      </button>
-                    )
-                  )}
-
-                  {u.id !== me?._id && u.role !== 'admin' && (
-                    u.deletedAt ? (
-                      <button
-                        onClick={() => restore(u.id)}
-                        disabled={busy === u.id}
-                        title={`Deleted ${fmt(u.deletedAt)}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 transition shrink-0"
-                      >
-                        <RotateCcw size={13} /> Restore
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => softDelete(u.id, u.username)}
-                        disabled={busy === u.id}
-                        title="Soft-delete this account (hides from public, restorable)"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-neutral-200 text-neutral-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 disabled:opacity-50 transition shrink-0"
-                      >
-                        <Trash2 size={13} /> Delete
-                      </button>
-                    )
-                  )}
                 </li>
               ))}
             </ul>
@@ -475,21 +481,23 @@ function WalletControl({ icon = 'wallet', label = 'Wallet', value, onChange }) {
         type="button"
         onClick={() => apply(+1)}
         disabled={busy || !amount}
-        aria-label={`Add to ${label}`}
+        aria-label={`Credit ${label} (apply)`}
+        title={`Credit ${label}`}
         className={`w-6 h-6 grid place-items-center rounded-lg text-white disabled:opacity-40 ${
           isEarnings ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-500 hover:bg-emerald-600'
         }`}
       >
-        <Plus size={11} strokeWidth={2.6} />
+        <Check size={11} strokeWidth={2.8} />
       </button>
       <button
         type="button"
         onClick={() => apply(-1)}
         disabled={busy || !amount}
-        aria-label={`Deduct from ${label}`}
-        className="w-6 h-6 grid place-items-center rounded-lg bg-neutral-700 text-white hover:bg-neutral-800 disabled:opacity-40"
+        aria-label={`Debit ${label}`}
+        title={`Debit ${label}`}
+        className="w-6 h-6 grid place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600 disabled:opacity-40"
       >
-        <Minus size={11} strokeWidth={2.6} />
+        <X size={11} strokeWidth={2.8} />
       </button>
     </div>
   );
