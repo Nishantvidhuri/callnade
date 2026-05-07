@@ -30,20 +30,86 @@ export function getActiveCalls() {
   }));
 }
 
-async function billOnce(io, callId) {
+// How often unsaved billing is flushed to the DB. The in-memory ticker
+// runs every second so the UI feels live, but we batch the writes.
+// 30s strikes a balance: bounded loss if the process dies (≤30s of
+// billing) without thrashing the DB on every tick.
+const FLUSH_INTERVAL_MS = 30_000;
+
+/**
+ * Persist whatever's accumulated in `c.unsavedBill` / `c.unsavedEarn`
+ * to the DB via atomic `$inc`s, then reset the counters and refresh
+ * the cached snapshot.
+ *
+ * Uses `$inc` (not `findById → modify → save`) for two reasons:
+ *   1. Atomic w.r.t. concurrent admin top-ups / debits.
+ *   2. Skips Mongoose's full doc validation, which would otherwise
+ *      run on every save and tank the throughput.
+ */
+async function flushBilling(callId) {
+  const c = calls.get(callId);
+  if (!c) return;
+  const bill = c.unsavedBill || 0;
+  const earn = c.unsavedEarn || 0;
+  if (bill <= 0 && earn <= 0) {
+    c.lastFlushAt = Date.now();
+    return;
+  }
+  // Reset counters BEFORE awaiting so re-entrant ticks don't double-flush.
+  c.unsavedBill = 0;
+  c.unsavedEarn = 0;
+  try {
+    await Promise.all([
+      bill > 0
+        ? User.updateOne({ _id: c.callerId }, { $inc: { walletBalance: -bill } })
+        : Promise.resolve(),
+      earn > 0
+        ? User.updateOne({ _id: c.calleeId }, { $inc: { earningsBalance: earn } })
+        : Promise.resolve(),
+    ]);
+    c.cachedCallerBalance = round2((c.cachedCallerBalance || 0) - bill);
+    c.cachedCalleeBalance = round2((c.cachedCalleeBalance || 0) + earn);
+    c.lastFlushAt = Date.now();
+  } catch (err) {
+    // On flush failure, restore the counters so the next flush picks
+    // them back up. We may double-emit `wallet:update` in the meantime
+    // but the UI is idempotent on those.
+    c.unsavedBill = round2(c.unsavedBill + bill);
+    c.unsavedEarn = round2(c.unsavedEarn + earn);
+    logger.error({ err, callId }, 'billing flush failed');
+  }
+}
+
+/**
+ * Per-second billing tick. Pure in-memory math — no DB hit unless
+ * the flush interval has elapsed or the caller has run out of credits.
+ *
+ * Emits `wallet:update` (and the friendlier `call:billed`/`call:earned`
+ * events) every tick so the live wallet pill ticks down once a second.
+ */
+async function billTick(io, callId) {
   const c = calls.get(callId);
   if (!c || !c.billRate) return;
 
-  const [caller, callee] = await Promise.all([
-    User.findById(c.callerId),
-    User.findById(c.calleeId),
-  ]);
-  if (!caller || !callee) return;
+  const billPerSec = c.billRate / 60;
+  const earnPerSec = c.earnRate / 60;
 
-  const billRate = c.billRate; // what caller pays this minute
-  const earnRate = c.earnRate; // what creator earns this minute
+  // In-memory tally of credits owed but not yet flushed.
+  c.unsavedBill = round2((c.unsavedBill || 0) + billPerSec);
+  c.unsavedEarn = round2((c.unsavedEarn || 0) + earnPerSec);
+  c.totalBilled = round2((c.totalBilled || 0) + billPerSec);
+  c.totalEarned = round2((c.totalEarned || 0) + earnPerSec);
 
-  if ((caller.walletBalance || 0) < billRate) {
+  const liveCallerBalance = round2(
+    Math.max(0, (c.cachedCallerBalance || 0) - (c.unsavedBill || 0)),
+  );
+  const liveCalleeBalance = round2(
+    (c.cachedCalleeBalance || 0) + (c.unsavedEarn || 0),
+  );
+
+  // Caller is broke: flush whatever we accrued, then end the call.
+  if ((c.cachedCallerBalance || 0) - (c.unsavedBill || 0) <= 0) {
+    await flushBilling(callId);
     io.to(room(callId)).emit('call:ended', { callId, reason: 'insufficient_credits' });
     io.to(userRoom(c.callerId)).emit('call:ended', { callId, reason: 'insufficient_credits' });
     io.to(userRoom(c.calleeId)).emit('call:ended', { callId, reason: 'insufficient_credits' });
@@ -51,38 +117,74 @@ async function billOnce(io, callId) {
     return;
   }
 
-  // Round to 2 decimals on every billing tick — floating-point math
-  // accumulates errors over the course of a call (e.g. 9943.600000000002).
-  caller.walletBalance = round2(Math.max(0, (caller.walletBalance || 0) - billRate));
-  callee.earningsBalance = round2((callee.earningsBalance || 0) + earnRate);
-  c.totalBilled = round2((c.totalBilled || 0) + billRate);
-  c.totalEarned = round2((c.totalEarned || 0) + earnRate);
-  await Promise.all([caller.save(), callee.save()]);
-
-  notifyUser(c.callerId, 'wallet:update', { walletBalance: caller.walletBalance });
-  notifyUser(c.calleeId, 'wallet:update', { earningsBalance: callee.earningsBalance });
+  // Live UI emits — every second, no DB hit.
+  notifyUser(c.callerId, 'wallet:update', { walletBalance: liveCallerBalance });
+  notifyUser(c.calleeId, 'wallet:update', { earningsBalance: liveCalleeBalance });
   notifyUser(c.callerId, 'call:billed', {
     callId,
     totalBilled: c.totalBilled,
-    walletBalance: caller.walletBalance,
+    walletBalance: liveCallerBalance,
   });
-  // Tell the creator how much they've earned so far AND how many credits the
-  // caller has left, so they can see how soon the call may end on credits.
   notifyUser(c.calleeId, 'call:earned', {
     callId,
     totalEarned: c.totalEarned,
-    earningsBalance: callee.earningsBalance,
-    callerBalance: caller.walletBalance,
+    earningsBalance: liveCalleeBalance,
+    callerBalance: liveCallerBalance,
   });
+
+  // Periodic DB flush (~every 30s).
+  if (Date.now() - (c.lastFlushAt || 0) >= FLUSH_INTERVAL_MS) {
+    await flushBilling(callId);
+  }
+}
+
+/**
+ * Boot up the per-second ticker and seed the in-memory balance cache
+ * from the DB. Called once at call accept.
+ */
+async function startBillingTicker(io, callId) {
+  const c = calls.get(callId);
+  if (!c || !c.billRate || c.billTimer) return;
+
+  // Seed cached balances so the live UI starts from the right number.
+  const [callerDoc, calleeDoc] = await Promise.all([
+    User.findById(c.callerId).select('walletBalance').lean(),
+    User.findById(c.calleeId).select('earningsBalance').lean(),
+  ]);
+  c.cachedCallerBalance = round2(callerDoc?.walletBalance || 0);
+  c.cachedCalleeBalance = round2(calleeDoc?.earningsBalance || 0);
+  c.unsavedBill = 0;
+  c.unsavedEarn = 0;
+  c.lastFlushAt = Date.now();
+
+  c.billTimer = setInterval(() => {
+    billTick(io, callId).catch((err) =>
+      logger.error({ err, callId }, 'billing tick failed'),
+    );
+  }, 1000);
 }
 
 async function endCall(callId, reason = 'hangup') {
   const c = calls.get(callId);
   if (!c) return;
+  // Stop the per-second ticker first so no more ticks fire after the
+  // final flush below.
+  if (c.billTimer) {
+    clearInterval(c.billTimer);
+    c.billTimer = null;
+  }
+  // Legacy schedulers from previous deploy versions — clear if present.
+  if (c.billTimeout) {
+    clearTimeout(c.billTimeout);
+    c.billTimeout = null;
+  }
   if (c.billInterval) {
     clearInterval(c.billInterval);
     c.billInterval = null;
   }
+  // Flush any unsaved billing one last time before we forget the
+  // in-memory state. This is the durable record of the call's money.
+  await flushBilling(callId);
   const endedAt = new Date();
   const durationSec = c.startedAt
     ? Math.floor((endedAt - new Date(c.startedAt)) / 1000)
@@ -188,10 +290,12 @@ export function registerCallHandlers(io, socket) {
     socket.join(room(callId));
     io.to(userRoom(c.callerId)).emit('call:accepted', { callId });
 
-    if (c.billRate > 0 && !c.billInterval) {
-      c.billInterval = setInterval(() => {
-        billOnce(io, callId).catch((err) => logger.error({ err, callId }, 'billing failed'));
-      }, 60_000);
+    if (c.billRate > 0 && !c.billTimer) {
+      // 1Hz ticker — UI updates every second, DB flushes every 30s
+      // (and on call end). See startBillingTicker.
+      startBillingTicker(io, callId).catch((err) =>
+        logger.error({ err, callId }, 'failed to start billing ticker'),
+      );
     }
 
     ack?.({ ok: true });
