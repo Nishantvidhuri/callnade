@@ -3,6 +3,7 @@ import { Routes, Route, useLocation, matchPath, Navigate } from 'react-router-do
 import { useAuth, bootstrapAuth } from './hooks/useAuth.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import { useIncomingCalls } from './hooks/useIncomingCalls.js';
+import { useWalletSync } from './hooks/useWalletSync.js';
 import { forceLogVisit } from './services/visit.js';
 import RequireAuth from './components/RequireAuth.jsx';
 import LoginPromptModal from './components/LoginPromptModal.jsx';
@@ -42,6 +43,7 @@ export default function App() {
 
   useNotifications();
   useIncomingCalls();
+  useWalletSync();
 
   useEffect(() => {
     bootstrapAuth().finally(() => setBooted(true));
