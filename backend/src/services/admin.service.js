@@ -5,16 +5,25 @@ import { avatarThumb } from '../utils/signedUrl.js';
 import { badRequest, notFound } from '../utils/HttpError.js';
 import { getActiveCalls } from '../realtime/handlers/call.handlers.js';
 
-export async function listAllUsers({ cursor, limit = 30, q } = {}) {
+export async function listAllUsers({ cursor, limit = 30, q, sort = 'newest' } = {}) {
+  // sort: 'newest' (default — newest signups first) | 'oldest'.
+  // Cursor pagination is on _id which monotonically increases with
+  // creation time, so the sort direction also dictates the cursor
+  // comparator below.
+  const order = sort === 'oldest' ? 1 : -1;
+
   const filter = {};
   if (q && q.trim()) {
     const re = new RegExp(escapeRegex(q.trim()), 'i');
     filter.$or = [{ username: re }, { displayName: re }, { email: re }];
   }
-  if (cursor) filter._id = { $lt: cursor };
+  if (cursor) {
+    // Newest-first paginates with _id < cursor; oldest-first with _id > cursor.
+    filter._id = order === -1 ? { $lt: cursor } : { $gt: cursor };
+  }
 
   const users = await User.find(filter)
-    .sort({ _id: -1 })
+    .sort({ _id: order })
     .limit(limit + 1)
     .select('_id email username displayName avatarMediaId followerCount followingCount isAdmin role banned bannedAt deletedAt walletBalance earningsBalance createdAt lastSeenAt')
     .lean();

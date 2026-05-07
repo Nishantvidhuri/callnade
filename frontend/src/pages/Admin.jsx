@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Shield, Ban, RotateCcw, Video, Wallet, FileText, Trash2, Check, X } from 'lucide-react';
+import {
+  Search, Shield, Ban, RotateCcw, Video, Wallet, FileText, Trash2,
+  Check, X, Pencil, ArrowDownUp,
+} from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import HomeSidebar from '../components/HomeSidebar.jsx';
@@ -22,6 +25,11 @@ export default function Admin() {
   const [busy, setBusy] = useState(null);
   const [activeCalls, setActiveCalls] = useState([]);
   const [detailUserId, setDetailUserId] = useState(null);
+  // Per-row edit mode: only one row can have its action panel open at a
+  // time. Tapping another row's pencil collapses the previous one.
+  const [editingId, setEditingId] = useState(null);
+  // 'newest' first (default) | 'oldest' first.
+  const [sort, setSort] = useState('newest');
   const debounceRef = useRef(null);
 
   const callMap = activeCalls.reduce((acc, c) => {
@@ -50,7 +58,11 @@ export default function Admin() {
     setError(null);
     try {
       const { data } = await api.get('/admin/users', {
-        params: { cursor: nextCursor || undefined, q: debouncedQuery || undefined },
+        params: {
+          cursor: nextCursor || undefined,
+          q: debouncedQuery || undefined,
+          sort,
+        },
       });
       setItems((prev) => (nextCursor ? [...prev, ...data.items] : data.items));
       setCursor(data.nextCursor);
@@ -64,7 +76,7 @@ export default function Admin() {
   useEffect(() => {
     load(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedQuery]);
+  }, [debouncedQuery, sort]);
 
   const ban = async (userId) => {
     if (!confirm('Ban this user? They will be logged out and unable to sign in.')) return;
@@ -193,18 +205,30 @@ export default function Admin() {
               </Link>
             </div>
           </div>
-          <div className="relative max-w-md">
-            <Search
-              size={16}
-              strokeWidth={1.8}
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
-            />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name, handle or email"
-              className="w-full pl-9 pr-4 py-2 text-sm rounded-full bg-white/80 backdrop-blur-md border border-white/80 focus:outline-none focus:bg-white focus:border-brand-300 focus:ring-2 focus:ring-brand-100 transition"
-            />
+          <div className="flex items-center gap-2 max-w-2xl">
+            <div className="relative flex-1 min-w-0">
+              <Search
+                size={16}
+                strokeWidth={1.8}
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name, handle or email"
+                className="w-full pl-9 pr-4 py-2 text-sm rounded-full bg-white/80 backdrop-blur-md border border-white/80 focus:outline-none focus:bg-white focus:border-brand-300 focus:ring-2 focus:ring-brand-100 transition"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setSort((s) => (s === 'newest' ? 'oldest' : 'newest'))}
+              title={sort === 'newest' ? 'Showing newest first — tap to switch to oldest' : 'Showing oldest first — tap to switch to newest'}
+              aria-label="Toggle sort order"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition shrink-0"
+            >
+              <ArrowDownUp size={13} />
+              <span className="hidden sm:inline">{sort === 'newest' ? 'Newest' : 'Oldest'}</span>
+            </button>
           </div>
         </div>
 
@@ -316,95 +340,117 @@ export default function Admin() {
                     </div>
                   </Link>
 
-                  {/* Action cluster. On mobile this drops below the
-                      user info as a wrapped row of compact controls; on
-                      lg+ it stays inline on the right. */}
-                  <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
-                    <div className="flex flex-col gap-1.5 shrink-0">
-                      {/* Providers earn, they don't spend — hide their wallet
-                          control. Users (and admins) keep the wallet. */}
-                      {u.role !== 'provider' && (
-                        <WalletControl
-                          icon="wallet"
-                          label="Wallet"
-                          value={u.walletBalance ?? 0}
-                          onChange={(delta) => adjustWallet(u.id, delta)}
-                        />
-                      )}
-                      {(u.role === 'provider' || u.role === 'admin') && (
-                        <WalletControl
-                          icon="earnings"
-                          label="Earnings"
-                          value={u.earningsBalance ?? 0}
-                          onChange={(delta) => adjustEarnings(u.id, delta)}
-                        />
-                      )}
-                    </div>
+                  {/* Edit toggle — collapsed by default, expanded only
+                      when the admin taps the pencil. Keeps the list
+                      scannable; full controls (Wallet/Earnings adjust,
+                      role select, Ban, Delete, view details) only show
+                      while editing this row. */}
+                  {editingId === u.id ? (
+                    <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+                      <div className="flex flex-col gap-1.5 shrink-0">
+                        {u.role !== 'provider' && (
+                          <WalletControl
+                            icon="wallet"
+                            label="Wallet"
+                            value={u.walletBalance ?? 0}
+                            onChange={(delta) => adjustWallet(u.id, delta)}
+                          />
+                        )}
+                        {(u.role === 'provider' || u.role === 'admin') && (
+                          <WalletControl
+                            icon="earnings"
+                            label="Earnings"
+                            value={u.earningsBalance ?? 0}
+                            onChange={(delta) => adjustEarnings(u.id, delta)}
+                          />
+                        )}
+                      </div>
 
+                      <button
+                        type="button"
+                        onClick={() => setDetailUserId(u.id)}
+                        title="View verification photo & consent record"
+                        aria-label="View user details"
+                        className="w-9 h-9 grid place-items-center rounded-full border border-neutral-200 text-neutral-600 hover:text-ink hover:bg-neutral-50 transition shrink-0"
+                      >
+                        <FileText size={14} />
+                      </button>
+
+                      {u.id !== me?._id && (
+                        <select
+                          value={u.role || 'user'}
+                          onChange={(e) => setRole(u.id, e.target.value)}
+                          className="text-xs rounded-lg border border-neutral-200 px-2 py-1.5 shrink-0 bg-white"
+                        >
+                          <option value="user">User</option>
+                          <option value="provider">Provider</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      )}
+
+                      {u.id !== me?._id && u.role !== 'admin' && (
+                        u.banned ? (
+                          <button
+                            onClick={() => unban(u.id)}
+                            disabled={busy === u.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-neutral-200 hover:bg-neutral-50 disabled:opacity-50 transition shrink-0"
+                          >
+                            <RotateCcw size={13} /> Unban
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => ban(u.id)}
+                            disabled={busy === u.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition shrink-0"
+                          >
+                            <Ban size={13} /> Ban
+                          </button>
+                        )
+                      )}
+
+                      {u.id !== me?._id && u.role !== 'admin' && (
+                        u.deletedAt ? (
+                          <button
+                            onClick={() => restore(u.id)}
+                            disabled={busy === u.id}
+                            title={`Deleted ${fmt(u.deletedAt)}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 transition shrink-0"
+                          >
+                            <RotateCcw size={13} /> Restore
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => softDelete(u.id, u.username)}
+                            disabled={busy === u.id}
+                            title="Soft-delete this account (hides from public, restorable)"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-neutral-200 text-neutral-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 disabled:opacity-50 transition shrink-0"
+                          >
+                            <Trash2 size={13} /> Delete
+                          </button>
+                        )
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        title="Done"
+                        aria-label="Close edit mode"
+                        className="w-9 h-9 grid place-items-center rounded-full bg-ink text-white hover:bg-neutral-800 transition shrink-0"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => setDetailUserId(u.id)}
-                      title="View verification photo & consent record"
-                      aria-label="View user details"
-                      className="w-9 h-9 grid place-items-center rounded-full border border-neutral-200 text-neutral-600 hover:text-ink hover:bg-neutral-50 transition shrink-0"
+                      onClick={() => setEditingId(u.id)}
+                      title="Edit user"
+                      aria-label="Edit user"
+                      className="w-9 h-9 grid place-items-center rounded-full border border-neutral-200 text-neutral-600 hover:text-ink hover:bg-neutral-50 transition shrink-0 self-end lg:self-auto"
                     >
-                      <FileText size={14} />
+                      <Pencil size={14} />
                     </button>
-
-                    {u.id !== me?._id && (
-                      <select
-                        value={u.role || 'user'}
-                        onChange={(e) => setRole(u.id, e.target.value)}
-                        className="text-xs rounded-lg border border-neutral-200 px-2 py-1.5 shrink-0 bg-white"
-                      >
-                        <option value="user">User</option>
-                        <option value="provider">Provider</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    )}
-
-                    {u.id !== me?._id && u.role !== 'admin' && (
-                      u.banned ? (
-                        <button
-                          onClick={() => unban(u.id)}
-                          disabled={busy === u.id}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-neutral-200 hover:bg-neutral-50 disabled:opacity-50 transition shrink-0"
-                        >
-                          <RotateCcw size={13} /> Unban
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => ban(u.id)}
-                          disabled={busy === u.id}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition shrink-0"
-                        >
-                          <Ban size={13} /> Ban
-                        </button>
-                      )
-                    )}
-
-                    {u.id !== me?._id && u.role !== 'admin' && (
-                      u.deletedAt ? (
-                        <button
-                          onClick={() => restore(u.id)}
-                          disabled={busy === u.id}
-                          title={`Deleted ${fmt(u.deletedAt)}`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 transition shrink-0"
-                        >
-                          <RotateCcw size={13} /> Restore
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => softDelete(u.id, u.username)}
-                          disabled={busy === u.id}
-                          title="Soft-delete this account (hides from public, restorable)"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-neutral-200 text-neutral-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 disabled:opacity-50 transition shrink-0"
-                        >
-                          <Trash2 size={13} /> Delete
-                        </button>
-                      )
-                    )}
-                  </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -441,20 +487,36 @@ function fmt(iso) {
 }
 
 function WalletControl({ icon = 'wallet', label = 'Wallet', value, onChange }) {
-  const [amount, setAmount] = useState('');
+  // The input holds the desired NEW absolute balance. Defaults to the
+  // current balance so the admin sees what they're editing. On ✓ we
+  // diff against `value` and dispatch the delta to the existing
+  // /admin/users/:id/wallet endpoint (which is delta-based).
+  const [amount, setAmount] = useState(String(value ?? 0));
   const [busy, setBusy] = useState(false);
   const isEarnings = icon === 'earnings';
 
-  const apply = async (sign) => {
-    const n = Math.abs(parseInt(amount, 10));
-    if (!Number.isFinite(n) || n <= 0) return;
+  // Re-sync if the parent's value changes (e.g. after a successful save
+  // or socket push from a live billing tick).
+  useEffect(() => {
+    setAmount(String(value ?? 0));
+  }, [value]);
+
+  const parsed = parseFloat(amount);
+  const dirty = Number.isFinite(parsed) && parsed >= 0 && parsed !== Number(value);
+
+  const apply = async () => {
+    if (!dirty) return;
+    const delta = round2(parsed - Number(value));
     setBusy(true);
     try {
-      await onChange(sign * n);
-      setAmount('');
+      await onChange(delta);
     } finally {
       setBusy(false);
     }
+  };
+
+  const cancel = () => {
+    setAmount(String(value ?? 0));
   };
 
   return (
@@ -465,24 +527,32 @@ function WalletControl({ icon = 'wallet', label = 'Wallet', value, onChange }) {
             ? 'bg-amber-50 text-amber-700 border-amber-100'
             : 'bg-emerald-50 text-emerald-700 border-emerald-100'
         }`}
-        title={`${label} balance`}
+        title={`Edit ${label} balance`}
       >
         <Wallet size={10} strokeWidth={2.2} />
-        {fmtCredits(value)}
+        {label}
       </span>
       <input
         type="number"
+        min={0}
+        step="0.01"
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
         placeholder="0"
-        className="w-12 px-1.5 py-1 text-[11px] rounded-lg border border-neutral-200 focus:outline-none focus:border-brand-300"
+        className={`w-20 px-2 py-1 text-[12px] tabular-nums rounded-lg border focus:outline-none transition ${
+          dirty
+            ? isEarnings
+              ? 'border-amber-300 bg-amber-50 focus:border-amber-400'
+              : 'border-emerald-300 bg-emerald-50 focus:border-emerald-400'
+            : 'border-neutral-200 focus:border-brand-300'
+        }`}
       />
       <button
         type="button"
-        onClick={() => apply(+1)}
-        disabled={busy || !amount}
-        aria-label={`Credit ${label} (apply)`}
-        title={`Credit ${label}`}
+        onClick={apply}
+        disabled={busy || !dirty}
+        aria-label={`Save ${label}`}
+        title={dirty ? `Set ${label} to ${parsed}` : `${label} unchanged`}
         className={`w-6 h-6 grid place-items-center rounded-lg text-white disabled:opacity-40 ${
           isEarnings ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-500 hover:bg-emerald-600'
         }`}
@@ -491,10 +561,10 @@ function WalletControl({ icon = 'wallet', label = 'Wallet', value, onChange }) {
       </button>
       <button
         type="button"
-        onClick={() => apply(-1)}
-        disabled={busy || !amount}
-        aria-label={`Debit ${label}`}
-        title={`Debit ${label}`}
+        onClick={cancel}
+        disabled={busy || !dirty}
+        aria-label={`Cancel ${label} edit`}
+        title="Discard edit"
         className="w-6 h-6 grid place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600 disabled:opacity-40"
       >
         <X size={11} strokeWidth={2.8} />
@@ -502,6 +572,10 @@ function WalletControl({ icon = 'wallet', label = 'Wallet', value, onChange }) {
     </div>
   );
 }
+
+// Same 2-decimal rounding used backend-side. Keeps deltas clean despite
+// floating-point math when the admin types fractional values.
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 function RoleChip({ role }) {
   const r = role || 'user';

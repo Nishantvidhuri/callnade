@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Video, Phone, Camera, Lock, BellRing, BellPlus, Check,
-  Save, LogOut, Edit3, Receipt,
+  Save, LogOut, Edit3, Receipt, Shield,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
@@ -281,6 +281,14 @@ export default function Profile() {
             >
               <Receipt size={14} /> Billing
             </Link>
+            {(me?.role === 'admin' || me?.isAdmin) && (
+              <Link
+                to="/admin"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-brand-200 text-brand-600 bg-brand-50 hover:bg-brand-100 transition"
+              >
+                <Shield size={14} /> Admin
+              </Link>
+            )}
             <button
               type="button"
               onClick={handleLogout}

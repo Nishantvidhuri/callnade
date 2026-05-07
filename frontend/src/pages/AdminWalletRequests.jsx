@@ -129,18 +129,18 @@ export default function AdminWalletRequests() {
         <MobileTopBar />
         <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-3 shrink-0">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => nav('/admin')}
-              className="lg:hidden w-9 h-9 grid place-items-center rounded-full bg-white/80 backdrop-blur-md border border-white/80 text-neutral-700 hover:bg-white"
-              aria-label="Back"
-            >
-              <ArrowLeft size={18} strokeWidth={1.8} />
-            </button>
             <div className="min-w-0 flex-1">
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
                 <Wallet size={22} className="text-brand-500" /> Wallet requests
               </h1>
             </div>
+            <Link
+              to="/admin"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition shrink-0"
+              title="Back to Admin"
+            >
+              <ArrowLeft size={13} /> <span className="hidden sm:inline">Admin</span>
+            </Link>
             <button
               type="button"
               onClick={loadFirstPage}
