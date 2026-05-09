@@ -8,7 +8,6 @@ import { usePresenceSync } from './hooks/usePresenceSync.js';
 import { forceLogVisit } from './services/visit.js';
 import RequireAuth from './components/RequireAuth.jsx';
 import LoginPromptModal from './components/LoginPromptModal.jsx';
-import BecomeCreatorButton from './components/BecomeCreatorButton.jsx';
 
 import Home from './pages/Home.jsx';
 import Login from './pages/Login.jsx';
@@ -113,7 +112,6 @@ export default function App() {
       {/* AgeGateModal is now mounted inside Home.jsx so it pops up every
           time an anonymous visitor lands on the home page — the product
           wants per-visit confirmation, not the previous 24h cache. */}
-      {!chromeless && <BecomeCreatorButton />}
     </>
   );
 }
