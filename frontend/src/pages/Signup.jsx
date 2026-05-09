@@ -5,6 +5,7 @@ import {
   Upload, ShieldCheck,
 } from 'lucide-react';
 import { api } from '../services/api.js';
+import { googleSignIn } from '../services/google.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { uploadAvatar, uploadVerification } from '../services/mediaUpload.js';
 import AuthLayout from '../components/AuthLayout.jsx';
@@ -14,6 +15,17 @@ import { AuthField, IconInput, inputCls } from '../components/AuthField.jsx';
 import DateOfBirthInput from '../components/DateOfBirthInput.jsx';
 import LiveCaptureModal from '../components/LiveCaptureModal.jsx';
 import ConsentForm from '../components/ConsentForm.jsx';
+
+// Gender-tile avatars. Swap the URLs for your own R2-hosted PNGs/SVGs
+// once you've uploaded them — or leave as-is and the tiles will fall
+// back to the emoji in `GenderTile` if the URL doesn't load. Using
+// transparent PNGs / clean white-bg images keeps the cards looking
+// like the reference design (label on top, illustration on a soft
+// pink wash below).
+const GIRL_AVATAR_URL =
+  'https://cdn-icons-png.flaticon.com/512/4140/4140047.png';
+const BOY_AVATAR_URL =
+  'https://cdn-icons-png.flaticon.com/512/4140/4140048.png';
 
 const linkCls = 'text-ink font-bold underline underline-offset-2';
 const ctaCls =
@@ -32,7 +44,6 @@ function ageFromIso(iso) {
 export default function Signup() {
   const nav = useNavigate();
   const [params] = useSearchParams();
-  const asCreator = params.get('as') === 'creator';
 
   const [form, setForm] = useState({
     firstName: '',
@@ -41,8 +52,31 @@ export default function Signup() {
     password: '',
     dateOfBirth: '',
     bio: '',
+    // Gender drives the role: 'female' → creator (provider account),
+    // 'male' → regular user. Single signup form replaces the previous
+    // `?as=creator` URL trick — folks were accidentally creating user
+    // accounts when they wanted to be a creator.
+    gender: '',
+    // Optional — referral code of whoever referred the new user.
+    // Pre-fills from `?ref=<code>` so referral links work out of the
+    // box. Only collected from regular users; creators don't see this
+    // input. Backend silently ignores unknown / banned codes.
+    referralCode: params.get('ref') || '',
   });
-  const [packages, setPackages] = useState(asCreator ? [blankPackage()] : []);
+  // Derived: female users sign up as creators, males as regular users.
+  const asCreator = form.gender === 'female';
+
+  const [packages, setPackages] = useState([]);
+  // When the user picks "girl" → seed the packages section with one
+  // blank package so the creator-specific UI has something to render.
+  // Picking "boy" clears it back out.
+  useEffect(() => {
+    setPackages((curr) => {
+      if (asCreator && curr.length === 0) return [blankPackage()];
+      if (!asCreator && curr.length) return [];
+      return curr;
+    });
+  }, [asCreator]);
   const [agree, setAgree] = useState(true);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -140,6 +174,7 @@ export default function Signup() {
         ...(form.bio ? { bio: form.bio } : {}),
         ...(form.dateOfBirth ? { dateOfBirth: form.dateOfBirth } : {}),
         ...(asCreator ? { role: 'provider' } : {}),
+        ...(form.referralCode.trim() ? { referralCode: form.referralCode.trim() } : {}),
         // Consent record — sent so the backend can store it alongside the user.
         consent: { fullName, signature, acceptedAt, version: '2026-05-06' },
       };
@@ -230,6 +265,39 @@ export default function Signup() {
       }
     >
       <form onSubmit={submit} noValidate className="flex flex-col gap-5">
+        {/* Gender selector — drives the role. Required before the rest
+            of the form unlocks. Female → creator, male → regular user.
+            We don't surface that mapping here on purpose; the creator
+            chrome (verification, packages) appears once "girl" is
+            picked and that's enough signal. */}
+        <Section
+          title="I am a…"
+          hint="Pick the option that applies to you."
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <GenderTile
+              active={form.gender === 'female'}
+              onClick={() => set('gender', 'female')}
+              imageUrl={GIRL_AVATAR_URL}
+              fallbackEmoji="👩"
+              label="Girl"
+            />
+            <GenderTile
+              active={form.gender === 'male'}
+              onClick={() => set('gender', 'male')}
+              imageUrl={BOY_AVATAR_URL}
+              fallbackEmoji="👨"
+              label="Boy"
+            />
+          </div>
+        </Section>
+
+        {/* Everything below this gate is only relevant once the user
+            has picked a side. Saves them from filling fields that
+            won't apply. */}
+        {!form.gender ? null : (
+          <>
+
         {asCreator && (
           <div className="inline-flex items-center gap-2 self-start px-3 py-1.5 rounded-full bg-tinder text-white text-xs font-bold shadow-tinder/40">
             <Sparkles size={12} fill="currentColor" /> Creator account
@@ -429,6 +497,27 @@ export default function Signup() {
               onChange={(e) => set('password', e.target.value)}
             />
           </AuthField>
+
+          {/* Referral input is regular-user only. Creators don't get
+              referred (no commercial reason to incentivise that). */}
+          {!asCreator && (
+            <AuthField label="Referral code">
+              <input
+                type="text"
+                placeholder="ABCD2345"
+                autoComplete="off"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={12}
+                value={form.referralCode}
+                onChange={(e) =>
+                  set('referralCode', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+                }
+                className={`${inputCls} font-mono tracking-wider`}
+              />
+            </AuthField>
+          )}
         </Section>
 
         {asCreator && (
@@ -536,9 +625,25 @@ export default function Signup() {
           <>
             <Divider />
             <SocialButtons
-              onGoogle={() => setError('Google sign-up coming soon')}
+              onGoogle={async () => {
+                setError(null);
+                setLoading(true);
+                try {
+                  const idToken = await googleSignIn();
+                  const { data } = await api.post('/auth/google', { idToken });
+                  useAuthStore.getState().setAuth(data);
+                  nav('/', { replace: true });
+                } catch (err) {
+                  setError(err.message || 'Google sign-in failed');
+                } finally {
+                  setLoading(false);
+                }
+              }}
               onFacebook={() => setError('Facebook sign-up coming soon')}
             />
+          </>
+        )}
+
           </>
         )}
       </form>
@@ -564,6 +669,54 @@ function Section({ title, hint, children }) {
       </div>
       <div className="space-y-2.5">{children}</div>
     </div>
+  );
+}
+
+/**
+ * Single gender option tile. Mimics the reference UI: label on top,
+ * cartoon avatar in the middle, white card with a subtle shadow on
+ * the active state.
+ *
+ * `imageUrl` is preferred — drop a hosted PNG/SVG into the URL
+ * constants near the top of this file (typically uploaded to your
+ * own R2 bucket so you control the asset). If the image fails to
+ * load (404 / CORS / dev-only) the tile falls back to the emoji
+ * passed in, so the page never looks empty.
+ */
+function GenderTile({ active, onClick, imageUrl, fallbackEmoji, label }) {
+  const [imgFailed, setImgFailed] = useState(!imageUrl);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition active:scale-[0.98] ${
+        active
+          ? 'border-brand-500 bg-white shadow-md shadow-brand-200/60'
+          : 'border-neutral-200 bg-white hover:border-brand-300'
+      }`}
+    >
+      <span
+        className={`text-sm font-bold tracking-wide ${
+          active ? 'text-brand-600' : 'text-neutral-500'
+        }`}
+      >
+        {label}
+      </span>
+      <div className="w-full aspect-square rounded-xl bg-gradient-to-b from-brand-50 to-white grid place-items-center overflow-hidden">
+        {imgFailed ? (
+          <span className="text-6xl leading-none select-none">{fallbackEmoji}</span>
+        ) : (
+          <img
+            src={imageUrl}
+            alt={label}
+            onError={() => setImgFailed(true)}
+            className="w-full h-full object-contain"
+            loading="lazy"
+          />
+        )}
+      </div>
+    </button>
   );
 }
 

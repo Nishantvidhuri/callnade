@@ -8,6 +8,7 @@ import { notFound } from '../utils/HttpError.js';
 import { avatarThumb } from '../utils/signedUrl.js';
 import { subscriberPrice } from '../utils/pricing.js';
 import { presentMedia } from './media.service.js';
+import { mintReferralCode } from './auth.service.js';
 
 const PROFILE_CACHE_TTL = 60;
 const profileKey = (username) => `profile:${username}`;
@@ -29,9 +30,39 @@ const NON_ADMIN_FILTER = {
 export async function getMe(userId) {
   const user = await User.findById(userId);
   if (!user) throw notFound('User not found');
+
+  // Lazy-backfill the referral code for accounts created before the
+  // referral system shipped. One DB write the first time they hit
+  // /users/me after deploy; never again.
+  if (!user.referralCode) {
+    user.referralCode = await mintReferralCode();
+    try {
+      await user.save();
+    } catch {
+      // Race with another /me call assigning the same code is
+      // vanishingly rare (different alphabets), but if it happens
+      // we just re-load — the unique index will surface a fresh code
+      // on the next /me call.
+    }
+  }
+
+  // If the user was referred, attach a small {username, displayName}
+  // snapshot of their referrer so the Profile page can show who they
+  // signed up under. Stashed directly on the user payload so it
+  // survives `setUser()` in the auth store without extra plumbing.
+  const userJson = user.toJSON();
+  if (user.referredBy) {
+    const r = await User.findById(user.referredBy)
+      .select('username displayName')
+      .lean();
+    if (r) {
+      userJson.referrer = { username: r.username, displayName: r.displayName || null };
+    }
+  }
+
   const gallery = await Media.find({ userId, type: 'gallery' }).sort({ position: 1 }).lean();
   return {
-    user: user.toJSON(),
+    user: userJson,
     avatar: await loadAvatar(user.avatarMediaId),
     gallery: gallery.map((m) => presentMedia(m, { canViewLocked: true })),
   };
@@ -49,15 +80,23 @@ export async function upgradeToProvider(userId) {
 }
 
 export async function updateMe(userId, patch) {
-  const allowed = (({ displayName, bio, isPrivate, isAdult }) => ({
-    displayName, bio, isPrivate, isAdult,
+  const allowed = (({ displayName, bio, isPrivate, isAdult, isActive }) => ({
+    displayName, bio, isPrivate, isAdult, isActive,
   }))(patch);
   Object.keys(allowed).forEach((k) => allowed[k] === undefined && delete allowed[k]);
-  // Only providers can mark themselves 18+. If a non-provider tries, drop it.
-  if ('isAdult' in allowed) {
+  // Only providers can flip provider-only flags. Drop quietly for
+  // anyone else trying to set them.
+  if ('isAdult' in allowed || 'isActive' in allowed) {
     const u = await User.findById(userId).select('role').lean();
-    if (u?.role !== 'provider') delete allowed.isAdult;
+    if (u?.role !== 'provider') {
+      delete allowed.isAdult;
+      delete allowed.isActive;
+    }
   }
+  // Coerce `isActive` to boolean — the patch comes from the request
+  // body so a stray string like "true" would otherwise bypass the
+  // discovery filter that compares to `true`.
+  if ('isActive' in allowed) allowed.isActive = !!allowed.isActive;
   const user = await User.findByIdAndUpdate(userId, allowed, { new: true });
   await redis.del(profileKey(user.username));
   return user.toJSON();
@@ -243,6 +282,10 @@ export async function listOnline({ limit = 24, excludeUserId, adult = false } = 
     role: 'provider',
     banned: { $ne: true },
     deletedAt: null,
+    // Creator-controlled "available" toggle. We treat missing as
+    // `true` for legacy rows that pre-date the field — they default
+    // to active, matching the new schema default.
+    isActive: { $ne: false },
     // Match legacy creators (no isAdult field) into the normal bucket.
     isAdult: adult ? true : { $ne: true },
   })

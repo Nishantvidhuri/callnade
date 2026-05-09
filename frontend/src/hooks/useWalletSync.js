@@ -16,11 +16,16 @@ import { getSocket } from '../services/socket.js';
  * Mounts once at the App level alongside useIncomingCalls / useNotifications.
  */
 export function useWalletSync() {
+  // Subscribe only to `accessToken` — using `me` as a dep would
+  // re-bind the listener on every patch (since we patch `me` here on
+  // each wallet:update), occasionally dropping in-flight events
+  // during the unsub→resub gap. We read current `me` lazily inside
+  // the callback via `getState()` instead.
   const accessToken = useAuthStore((s) => s.accessToken);
-  const me = useAuthStore((s) => s.user);
 
   useEffect(() => {
-    if (!accessToken || !me) return undefined;
+    if (!accessToken) return undefined;
+    if (!useAuthStore.getState().user) return undefined;
     const socket = getSocket();
 
     const onWallet = (payload) => {
@@ -42,5 +47,5 @@ export function useWalletSync() {
     return () => {
       socket.off('wallet:update', onWallet);
     };
-  }, [accessToken, me]);
+  }, [accessToken]);
 }

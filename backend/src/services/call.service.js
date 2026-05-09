@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { CallSession } from '../models/callSession.model.js';
+import { ReferralPayout } from '../models/referralPayout.model.js';
 import { User } from '../models/user.model.js';
 import { Media } from '../models/media.model.js';
 import { makeTurnCredentials } from '../utils/turnCreds.js';
@@ -166,6 +167,7 @@ export async function listTransactions(userId, { cursor, limit = 30 } = {}) {
 
     return {
       id: String(s._id),
+      kind: 'call',
       direction: isCaller ? 'outgoing' : 'incoming',
       amount: round2(amount),
       durationSec: s.durationSec || 0,
@@ -175,6 +177,61 @@ export async function listTransactions(userId, { cursor, limit = 30 } = {}) {
       peer: userMap.get(peerId) || null,
     };
   });
+
+  // Fold in referral payouts the user has received within the same
+  // _id window (so cursor-pagination boundaries line up). Each row
+  // shows up as +N "referral" alongside the call rows. We deliberately
+  // expose only the payout amount + the referee's username — never
+  // the original top-up amount that triggered it.
+  const refFilter = { userId };
+  if (cursor) {
+    try {
+      refFilter._id = { $lt: new mongoose.Types.ObjectId(cursor) };
+    } catch {
+      /* swallow */
+    }
+  }
+  const refs = await ReferralPayout.find(refFilter)
+    .sort({ _id: -1 })
+    .limit(lim + 1)
+    .lean();
+  const refUserIds = [...new Set(refs.map((r) => String(r.referredUserId)))];
+  const refPeers = refUserIds.length
+    ? await User.find({ _id: { $in: refUserIds } })
+        .select('_id username displayName avatarMediaId')
+        .lean()
+    : [];
+  const refAvatarIds = refPeers.map((u) => u.avatarMediaId).filter(Boolean);
+  const refAvatars = refAvatarIds.length
+    ? await Media.find({ _id: { $in: refAvatarIds } }).select('_id variants').lean()
+    : [];
+  const refAvatarMap = new Map(refAvatars.map((a) => [String(a._id), a]));
+  const refPeerMap = new Map(
+    refPeers.map((u) => [
+      String(u._id),
+      {
+        id: String(u._id),
+        username: u.username,
+        displayName: u.displayName || u.username,
+        avatarUrl: u.avatarMediaId
+          ? avatarThumb(refAvatarMap.get(String(u.avatarMediaId)))
+          : null,
+      },
+    ]),
+  );
+  for (const r of refs) {
+    items.push({
+      id: `ref:${String(r._id)}`,
+      kind: 'referral',
+      direction: 'incoming',
+      amount: round2(r.amount),
+      at: r.createdAt,
+      peer: refPeerMap.get(String(r.referredUserId)) || null,
+    });
+  }
+  // Stable interleave: re-sort the merged list by `at` desc. Both
+  // sources are already in desc order so a simple stable sort is fine.
+  items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
   // Aggregate totals over the full ledger (not just this page) — useful
   // for the summary cards on the billing page. Two cheap aggregations.

@@ -32,6 +32,11 @@ const schema = z.object({
   // ship to the frontend — only KEY_ID is exposed there.
   RAZORPAY_KEY_ID: z.string().default(''),
   RAZORPAY_KEY_SECRET: z.string().default(''),
+
+  // Google OAuth client ID for Sign-in-with-Google. Public (also
+  // exposed to the frontend as VITE_GOOGLE_CLIENT_ID), no secret
+  // needed for the ID-token verification flow we're using.
+  GOOGLE_CLIENT_ID: z.string().default(''),
 });
 
 const parsed = schema.safeParse(process.env);

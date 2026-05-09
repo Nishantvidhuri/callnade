@@ -74,3 +74,4 @@ const qrBody = express.raw({
 router.post('/withdraw', requireAuth, uploadLimiter, qrBody, asyncHandler(wallet.withdraw));
 
 router.get('/requests', requireAuth, asyncHandler(wallet.myRequests));
+router.get('/referral-payouts', requireAuth, asyncHandler(wallet.myReferralPayouts));

@@ -13,6 +13,10 @@ const updateMeSchema = z.object({
     bio: z.string().max(280).optional(),
     isPrivate: z.boolean().optional(),
     isAdult: z.boolean().optional(),
+    // Provider-only "available now" toggle. Service layer drops it
+    // for non-providers, but we let it through validation for both
+    // so the API surface is uniform.
+    isActive: z.boolean().optional(),
   }),
 });
 

@@ -4,6 +4,7 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { nanoid } from 'nanoid';
 import mongoose from 'mongoose';
 import { WalletRequest } from '../models/walletRequest.model.js';
+import { ReferralPayout } from '../models/referralPayout.model.js';
 import { User } from '../models/user.model.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
@@ -137,6 +138,23 @@ export async function createTopupRequest(
     );
   }
 
+  // First-payment bonus: every regular user gets 40 demo credits at
+  // signup so they can try out a creator call. On their FIRST top-up,
+  // we automatically tack 40 onto the amount as a thank-you for
+  // converting from demo. "First" = no prior non-rejected topup
+  // request exists; rejected-and-retry doesn't lose the bonus.
+  const FIRST_TOPUP_BONUS = 40;
+  const priorTopup = await WalletRequest.exists({
+    userId,
+    type: 'topup',
+    status: { $ne: 'rejected' },
+  });
+  const isFirstTopup = !priorTopup;
+  const finalAmount = isFirstTopup ? round2(amt + FIRST_TOPUP_BONUS) : amt;
+  const firstPaymentNote = isFirstTopup
+    ? `first-payment-bonus:+${FIRST_TOPUP_BONUS}`
+    : null;
+
   // Payment screenshot (optional but strongly recommended). Same
   // validation rules as the withdraw QR path: jpeg/png/webp, ≤4MB.
   // Uploads go to R2 under `wallet-topup/...` so admin moderation can
@@ -160,12 +178,16 @@ export async function createTopupRequest(
   const doc = await WalletRequest.create({
     userId,
     type: 'topup',
-    amount: amt,
+    // Persist the bumped amount so the admin sees the full sum they
+    // need to credit. The user's entered value is recoverable from
+    // adminNote ("first-payment-bonus:+40") if support ever needs it.
+    amount: finalAmount,
     status: 'pending',
     referenceId: ref,
     payerUpiId: payerVpa,
     qrUrl: screenshotUrl,
     qrContentType: screenshotUrl ? screenshotContentType : null,
+    adminNote: firstPaymentNote,
   });
   return {
     id: String(doc._id),
@@ -173,6 +195,9 @@ export async function createTopupRequest(
     referenceId: ref,
     payerUpiId: payerVpa,
     qrUrl: screenshotUrl,
+    enteredAmount: amt,
+    bonusApplied: isFirstTopup ? FIRST_TOPUP_BONUS : 0,
+    finalAmount,
   };
 }
 
@@ -353,7 +378,7 @@ export async function verifyRazorpayPayment(
  */
 export async function createWithdrawRequest(
   userId,
-  { amount, upiId },
+  { amount, upiId, source },
   qrBuffer,
   qrContentType,
 ) {
@@ -379,6 +404,34 @@ export async function createWithdrawRequest(
     throw badRequest('QR must be a JPEG, PNG, or WebP image');
   }
 
+  // Source decides which wallet the approval debits. 'earnings' is
+  // the creator-income path (legacy default); 'referral' debits the
+  // dedicated referral wallet. We pre-check the user has enough on
+  // that side so insufficient-balance failures land at submit time
+  // (not on admin approve).
+  const withdrawSource = source === 'referral' ? 'referral' : 'earnings';
+  const u = await User.findById(userId)
+    .select('earningsBalance referralWalletBalance role')
+    .lean();
+  if (!u) throw badRequest('User not found');
+  const sourceBalance =
+    withdrawSource === 'referral'
+      ? u.referralWalletBalance || 0
+      : u.earningsBalance || 0;
+  if (sourceBalance < amt) {
+    throw badRequest(
+      `Not enough credits in ${
+        withdrawSource === 'referral' ? 'referral wallet' : 'earnings'
+      } (you have ${sourceBalance})`,
+    );
+  }
+  // Earnings withdraws are creator-only; regular users have no
+  // earnings to draw from. Referral withdraws are open to anyone
+  // with a referral balance.
+  if (withdrawSource === 'earnings' && u.role !== 'provider' && u.role !== 'admin') {
+    throw badRequest('Only creators can withdraw from earnings');
+  }
+
   // Upload to R2 first; only persist the resulting URL on the
   // WalletRequest so the document stays small and the admin panel
   // can <img src> the QR directly without an authenticated fetch.
@@ -395,9 +448,10 @@ export async function createWithdrawRequest(
     upiId: upi,
     qrUrl,
     qrContentType,
+    withdrawSource,
     status: 'pending',
   });
-  return { id: String(doc._id), status: doc.status, qrUrl };
+  return { id: String(doc._id), status: doc.status, qrUrl, withdrawSource };
 }
 
 /**
@@ -427,6 +481,7 @@ export async function listMyRequests(userId) {
       // exists somewhere", qrUrl as the direct link.
       qrUrl: r.qrUrl || null,
       hasQr: !!(r.qrUrl || r.qrContentType),
+      withdrawSource: r.withdrawSource || (r.type === 'withdraw' ? 'earnings' : null),
       status: r.status,
       adminNote: r.adminNote,
       createdAt: r.createdAt,
@@ -506,6 +561,7 @@ export async function adminListWalletRequests({ type, status, cursor, limit = 30
       upiId: r.upiId,
       qrUrl: r.qrUrl || null,
       hasQr: !!(r.qrUrl || r.qrContentType),
+      withdrawSource: r.withdrawSource || (r.type === 'withdraw' ? 'earnings' : null),
       // Gateway markers (only set for Razorpay flows):
       gatewayOrderId: r.gatewayOrderId,
       gatewayPaymentId: r.gatewayPaymentId,
@@ -569,9 +625,18 @@ export async function adminWalletStats() {
   };
 }
 
+// Referral payout: 10% of an approved top-up goes to whoever referred
+// the topping-up user. Pulled to a constant so we can tweak it without
+// hunting through code.
+const REFERRAL_RATE = 0.1;
+
 /**
  * Approve a top-up request: credits the user's wallet by the request
- * amount and flips the request to `approved`. Idempotent.
+ * amount and flips the request to `approved`. If the user was referred
+ * by someone, 10% of the topped-up amount is also credited to the
+ * referrer's wallet (`$inc` so it's race-safe against concurrent
+ * billing ticks). Idempotent — second approval of the same request is
+ * a no-op.
  */
 export async function adminApproveTopup(adminId, requestId, { adminNote } = {}) {
   const request = await WalletRequest.findById(requestId);
@@ -603,17 +668,79 @@ export async function adminApproveTopup(adminId, requestId, { adminNote } = {}) 
     },
     'admin approved topup',
   );
+
+  // Referral payout: only on the FIRST approval (the early-return
+  // above guards against double payout) and only when the user has a
+  // referrer that's still active. We use $inc to avoid a load+save
+  // race with concurrent billing ticks on the referrer's wallet.
+  let referralPayout = 0;
+  if (user.referredBy) {
+    referralPayout = round2(request.amount * REFERRAL_RATE);
+    if (referralPayout > 0) {
+      try {
+        const res = await User.updateOne(
+          { _id: user.referredBy, deletedAt: null, banned: false },
+          {
+            $inc: {
+              // Land in the dedicated referral wallet so it can't
+              // accidentally be spent on calls. referralEarnings is
+              // a lifetime tally (display only) and stays parallel.
+              referralWalletBalance: referralPayout,
+              referralEarnings: referralPayout,
+            },
+          },
+        );
+        if (res.matchedCount === 0) {
+          // Referrer was banned/deleted between signup and now —
+          // skip the payout silently.
+          referralPayout = 0;
+        } else {
+          // Persist a row so the referrer can see a history of their
+          // payouts. We store the topping-up user's id for admin
+          // auditing, but the public read endpoint only exposes the
+          // payout amount + (optionally) the referred username — never
+          // the original top-up amount.
+          await ReferralPayout.create({
+            userId: user.referredBy,
+            referredUserId: user._id,
+            walletRequestId: request._id,
+            amount: referralPayout,
+          });
+          logger.info(
+            {
+              adminId: String(adminId),
+              requestId: String(request._id),
+              userId: String(user._id),
+              referrerId: String(user.referredBy),
+              amount: referralPayout,
+              source: 'topup',
+            },
+            'referral payout',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, referrerId: String(user.referredBy) },
+          'referral payout failed',
+        );
+        referralPayout = 0;
+      }
+    }
+  }
+
   return {
     ok: true,
     requestId: String(request._id),
     walletBalance: user.walletBalance,
+    referralPayout,
   };
 }
 
 /**
- * Approve a withdrawal request: debits the creator's earnings by the
- * request amount and flips the request to `approved`. Caller should
- * have already paid out off-platform via the UPI handle.
+ * Approve a withdrawal request: debits the appropriate balance
+ * (`earningsBalance` for source='earnings', `referralWalletBalance`
+ * for source='referral') and flips the request to `approved`. Caller
+ * should have already paid out off-platform via the UPI handle.
  */
 export async function adminApproveWithdraw(adminId, requestId, { adminNote } = {}) {
   const request = await WalletRequest.findById(requestId);
@@ -629,12 +756,20 @@ export async function adminApproveWithdraw(adminId, requestId, { adminNote } = {
   }
   const user = await User.findById(request.userId);
   if (!user) throw badRequest('User not found');
-  if ((user.earningsBalance || 0) < request.amount) {
+  // Default to 'earnings' so legacy rows (no withdrawSource set) keep
+  // working under the original creator-payout semantics.
+  const source = request.withdrawSource === 'referral' ? 'referral' : 'earnings';
+  const sourceField =
+    source === 'referral' ? 'referralWalletBalance' : 'earningsBalance';
+  const sourceLabel =
+    source === 'referral' ? 'Referral wallet' : 'Earnings';
+  const sourceBalance = user[sourceField] || 0;
+  if (sourceBalance < request.amount) {
     throw badRequest(
-      `Earnings balance ${user.earningsBalance || 0} is below request amount ${request.amount}`,
+      `${sourceLabel} balance ${sourceBalance} is below request amount ${request.amount}`,
     );
   }
-  user.earningsBalance = round2((user.earningsBalance || 0) - request.amount);
+  user[sourceField] = round2(sourceBalance - request.amount);
   await user.save();
   request.status = 'approved';
   request.actionedBy = adminId;
@@ -711,6 +846,90 @@ export async function adminGetWithdrawQr(requestId) {
   return {
     buffer: Buffer.from(r.qrData),
     contentType: r.qrContentType || 'image/jpeg',
+  };
+}
+
+/**
+ * List referral payouts touching the current user. Two directions:
+ *   - 'received' (default): payouts the user GOT (they're the referrer).
+ *     Each row shows credits earned + the referee's username.
+ *   - 'sent': payouts the user TRIGGERED (their top-ups paid their
+ *     referrer). Same shape, with the referrer's username instead.
+ *
+ * Either direction returns ONLY the payout amount (the 10% credit) —
+ * never the source top-up amount, in either direction. So a referrer
+ * can't reverse-engineer how much a specific friend recharged, and a
+ * referee can't see exactly how their referrer's wallet ledger moves
+ * beyond what was sent on their behalf.
+ *
+ * Cursor-paginated by _id desc; latest payouts first.
+ */
+export async function listMyReferralPayouts(
+  userId,
+  { cursor, limit = 30, direction = 'received' } = {},
+) {
+  const lim = Math.min(Math.max(Number(limit) || 30, 1), 100);
+  const isSent = direction === 'sent';
+  // 'received' shows everything the user got (topup payouts + their
+  // own signup bonus). 'sent' is "money I caused to flow", which only
+  // makes sense for topup payouts — signup-bonus rows pair the new
+  // user with their referrer, but the new user didn't really "send"
+  // that bonus to anyone, so we filter them out of the sent view.
+  const filter = isSent
+    ? { referredUserId: userId, kind: 'topup' }
+    : { userId };
+  if (cursor) {
+    try {
+      filter._id = { $lt: new mongoose.Types.ObjectId(cursor) };
+    } catch {
+      /* malformed cursor — ignore */
+    }
+  }
+
+  const rows = await ReferralPayout.find(filter)
+    .sort({ _id: -1 })
+    .limit(lim + 1)
+    .lean();
+
+  const hasMore = rows.length > lim;
+  const trimmed = hasMore ? rows.slice(0, lim) : rows;
+
+  // Lookup the OTHER side's user so we can show a username on each
+  // row. For 'received' that's the referee; for 'sent' that's the
+  // referrer. One round-trip either way.
+  const peerIds = [
+    ...new Set(
+      trimmed.map((r) => String(isSent ? r.userId : r.referredUserId)),
+    ),
+  ];
+  const peers = peerIds.length
+    ? await User.find({ _id: { $in: peerIds } })
+        .select('_id username displayName')
+        .lean()
+    : [];
+  const peerMap = new Map(
+    peers.map((u) => [String(u._id), { username: u.username, displayName: u.displayName }]),
+  );
+
+  return {
+    direction,
+    items: trimmed.map((r) => {
+      const peerId = String(isSent ? r.userId : r.referredUserId);
+      const peer = peerMap.get(peerId) || null;
+      return {
+        id: String(r._id),
+        amount: r.amount,
+        // Field name reflects the direction so the frontend can render
+        // either side cleanly. Source top-up amount intentionally absent.
+        peerUsername: peer?.username || null,
+        // 'topup' (10% from a referee's recharge) | 'signup'
+        // (one-time bonus the referee got at signup). Lets the
+        // frontend label the row appropriately.
+        kind: r.kind || 'topup',
+        createdAt: r.createdAt,
+      };
+    }),
+    nextCursor: hasMore ? String(trimmed[trimmed.length - 1]._id) : null,
   };
 }
 

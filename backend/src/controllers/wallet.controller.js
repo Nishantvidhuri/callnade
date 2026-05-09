@@ -43,12 +43,12 @@ export async function topup(req, res) {
  * trip with no multipart parsing.
  */
 export async function withdraw(req, res) {
-  const { amount, upiId } = req.query;
+  const { amount, upiId, source } = req.query;
   const contentType = req.headers['content-type'] || '';
   res.json(
     await walletService.createWithdrawRequest(
       req.user.id,
-      { amount: Number(amount), upiId },
+      { amount: Number(amount), upiId, source },
       req.body, // raw Buffer thanks to express.raw
       contentType,
     ),
@@ -57,6 +57,17 @@ export async function withdraw(req, res) {
 
 export async function myRequests(req, res) {
   res.json(await walletService.listMyRequests(req.user.id));
+}
+
+export async function myReferralPayouts(req, res) {
+  const { cursor, limit, direction } = req.query || {};
+  res.json(
+    await walletService.listMyReferralPayouts(req.user.id, {
+      cursor,
+      limit: limit ? Number(limit) : undefined,
+      direction: direction === 'sent' ? 'sent' : 'received',
+    }),
+  );
 }
 
 export async function createOrder(req, res) {

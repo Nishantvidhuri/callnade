@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Search, X, Wallet } from 'lucide-react';
 import { useAuthStore } from '../stores/auth.store.js';
+import ActiveToggle from './ActiveToggle.jsx';
 import { fmtCredits } from '../utils/formatCredits.js';
 
 /**
@@ -108,6 +109,10 @@ export default function MobileTopBar() {
             >
               callnade
             </Link>
+
+            {/* Creator-only "Available" toggle. Self-hides for
+                non-providers, so it's safe to always render. */}
+            <ActiveToggle />
 
             {me && (
               <Link

@@ -26,6 +26,14 @@ export async function login(req, res) {
   sendAuth(res, result);
 }
 
+export async function googleLogin(req, res) {
+  const result = await authService.loginWithGoogle({
+    idToken: req.body?.idToken,
+    ip: req.ip,
+  });
+  sendAuth(res, result);
+}
+
 export async function refresh(req, res) {
   const token = req.cookies?.[REFRESH_COOKIE];
   if (!token) return res.status(401).json({ error: { message: 'No refresh token' } });

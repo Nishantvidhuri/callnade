@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowDownLeft, ArrowUpRight, Wallet,
   PhoneOff, PhoneIncoming, PhoneOutgoing, RotateCw, ChevronRight,
@@ -101,16 +101,73 @@ export default function Billing() {
   // filter chip, and any incoming transaction rows for them.
   const canEarn = isProvider || isAdmin;
 
-  const visible = items.filter((t) => {
-    if (!canEarn && t.direction !== 'outgoing') return false;
-    return filter === 'all' || t.direction === filter;
-  });
+  // Filter + dedupe in one pass.
+  //
+  // Older calls were recorded twice in the DB because of a re-entry
+  // bug in the backend's `endCall` (now fixed) — both peers' hangup
+  // events plus the server's own end emit could all run the
+  // recordSession path concurrently. New calls are clean, but the
+  // historical duplicates are still in `callsessions`.
+  //
+  // The duplicates aren't byte-identical: `endedAt` (and therefore
+  // `durationSec`) often differs by 1s because the two end-paths
+  // resolved a moment apart. So an exact-tuple key misses them.
+  // We round the timestamp to the minute and drop duration from the
+  // key — same direction + peer + minute + amount is the same call
+  // for any practical purpose, and amount nailing it down avoids
+  // collapsing genuinely-different back-to-back calls.
+  const minuteKey = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}-${d.getUTCHours()}-${d.getUTCMinutes()}`;
+  };
+  const visible = (() => {
+    const seen = new Set();
+    return items.filter((t) => {
+      if (!canEarn && t.direction !== 'outgoing') return false;
+      if (filter !== 'all' && t.direction !== filter) return false;
+      // Referral rows are uniquely identified by their server id —
+      // never collapse them into call rows even if amounts/timestamps
+      // happen to coincide. Call dedup keeps the looser tuple key
+      // (covers the historical double-write bug).
+      const key =
+        t.kind === 'referral'
+          ? `ref:${t.id}`
+          : `${t.direction}|${t.peer?.id || 'none'}|${minuteKey(t.at)}|${t.amount}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
 
   // Action modal state — Add credits (regular users) and Withdraw
   // earnings (creators) are not self-service yet; admins move balances
   // from the admin panel for now. The modal explains that, plus shows
   // the user a copyable summary they can paste into a support ticket.
-  const [actionOpen, setActionOpen] = useState(null); // 'add' | 'withdraw' | null
+  const [actionOpen, setActionOpen] = useState(null); // 'add' | 'withdraw' | 'withdraw-referral' | null
+
+  // Deep-linked withdraw flow: /billing?withdraw=referral opens the
+  // referral-withdraw modal as soon as the page mounts. Used by the
+  // ReferralCard's Withdraw button on the Profile page.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const intent = params.get('withdraw');
+    if (intent === 'referral') {
+      setActionOpen('withdraw-referral');
+      // Strip the param so a second visit doesn't re-open the modal
+      // accidentally.
+      const next = new URLSearchParams(params);
+      next.delete('withdraw');
+      setParams(next, { replace: true });
+    } else if (intent === 'earnings') {
+      setActionOpen('withdraw');
+      const next = new URLSearchParams(params);
+      next.delete('withdraw');
+      setParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-neutral-950 text-ink">
@@ -157,17 +214,30 @@ export default function Billing() {
           )}
 
           {/* Balance + action cards.
-              - Regular users see the Wallet card only (Add credits).
-              - Creators (providers) see the Earnings card only (Withdraw).
-              - Admins see both for support purposes.
-              The grid auto-collapses to a single column when only one
-              card renders so we don't leave a hole. */}
+              - Regular users see the Wallet card (Add credits) plus a
+                Referral wallet card (Withdraw) when they have any
+                referral balance.
+              - Creators (providers) see Earnings (Withdraw) plus the
+                Referral wallet card when applicable.
+              - Admins see all three for support.
+              The grid auto-collapses to fewer columns when fewer cards
+              render so we don't leave holes. */}
           {(() => {
-            const showWallet = !isProvider; // hide wallet from creators
-            const showEarnings = canEarn;   // earnings for provider/admin
-            const cardCount = (showWallet ? 1 : 0) + (showEarnings ? 1 : 0);
+            const showWallet = !isProvider;
+            const showEarnings = canEarn;
+            // Always show the referral card for non-creators so they
+            // see it as a discoverable revenue stream even at zero
+            // balance. Creators only see it when they actually have
+            // referral credits (avoids cluttering their billing view
+            // with an empty card).
+            const showReferral =
+              !isProvider || (me?.referralWalletBalance || 0) > 0;
+            const cardCount =
+              (showWallet ? 1 : 0) + (showEarnings ? 1 : 0) + (showReferral ? 1 : 0);
             const gridCls =
-              cardCount > 1
+              cardCount >= 3
+                ? 'grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5'
+                : cardCount === 2
                 ? 'grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5'
                 : 'grid grid-cols-1 gap-3 mb-5';
             return (
@@ -196,6 +266,19 @@ export default function Billing() {
                     lifetimeLabel="Earned from calls"
                     lifetimeValue={summary.incomingTotal}
                     lifetimeCount={summary.incomingCount}
+                  />
+                )}
+                {showReferral && (
+                  <BalanceActionCard
+                    tone="earnings"
+                    label="Referral wallet"
+                    balance={me?.referralWalletBalance ?? 0}
+                    actionLabel="Withdraw"
+                    actionIcon={<ArrowDownToLine size={14} strokeWidth={2.6} />}
+                    onAction={() => setActionOpen('withdraw-referral')}
+                    lifetimeLabel="Earned from referrals"
+                    lifetimeValue={me?.referralEarnings ?? 0}
+                    lifetimeCount={me?.referralCount ?? 0}
                   />
                 )}
               </section>
@@ -287,6 +370,8 @@ export default function Billing() {
         balance={
           actionOpen === 'withdraw'
             ? (me?.earningsBalance ?? 0)
+            : actionOpen === 'withdraw-referral'
+            ? (me?.referralWalletBalance ?? 0)
             : (me?.walletBalance ?? 0)
         }
         onClose={() => setActionOpen(null)}
@@ -491,7 +576,12 @@ function BalanceActionCard({
 function ActionModal({ mode, balance, onClose, onSuccess, user }) {
   if (!mode) return null;
   const isAdd = mode === 'add';
-  const title = isAdd ? 'Add credits' : 'Withdraw earnings';
+  const isReferralWithdraw = mode === 'withdraw-referral';
+  const title = isAdd
+    ? 'Add credits'
+    : isReferralWithdraw
+    ? 'Withdraw referral'
+    : 'Withdraw earnings';
   const headerCls = isAdd
     ? 'bg-emerald-500 text-white'
     : 'bg-amber-500 text-white';
@@ -523,7 +613,12 @@ function ActionModal({ mode, balance, onClose, onSuccess, user }) {
           {isAdd ? (
             <AddCreditsForm balance={balance} onClose={onClose} onSuccess={onSuccess} user={user} />
           ) : (
-            <WithdrawForm balance={balance} onClose={onClose} onSuccess={onSuccess} />
+            <WithdrawForm
+              balance={balance}
+              source={isReferralWithdraw ? 'referral' : 'earnings'}
+              onClose={onClose}
+              onSuccess={onSuccess}
+            />
           )}
         </div>
       </div>
@@ -902,7 +997,7 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
  * On submit, we POST /wallet/withdraw which records the request as
  * `pending`. An admin actions it from the admin panel.
  */
-function WithdrawForm({ balance, onClose, onSuccess }) {
+function WithdrawForm({ balance, source = 'earnings', onClose, onSuccess }) {
   const [amount, setAmount] = useState('');
   const [upiId, setUpiId] = useState('');
   const [qrFile, setQrFile] = useState(null);
@@ -952,11 +1047,12 @@ function WithdrawForm({ balance, onClose, onSuccess }) {
     setSubmitting(true);
     setError(null);
     try {
-      // POST /wallet/withdraw — raw image bytes in body, amount + upiId
-      // in query string. Matches the established media-upload pattern.
+      // POST /wallet/withdraw — raw image bytes in body, amount +
+      // upiId + source in query string. Source decides which wallet
+      // gets debited on admin approval ('earnings' or 'referral').
       const buf = await qrFile.arrayBuffer();
       await api.post('/wallet/withdraw', buf, {
-        params: { amount: num, upiId: upiId.trim() },
+        params: { amount: num, upiId: upiId.trim(), source },
         headers: { 'Content-Type': qrFile.type },
         transformRequest: [(d) => d], // skip JSON serialization
       });
@@ -1141,10 +1237,18 @@ function FilterChip({ active, onClick, tone, children }) {
 
 function TransactionRow({ t }) {
   const isIn = t.direction === 'incoming';
+  const isReferral = t.kind === 'referral';
   const sign = isIn ? '+' : '−';
   const valueCls = isIn ? 'text-emerald-700' : 'text-rose-700';
-  const iconBg = isIn ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700';
-  const Icon = isIn ? PhoneIncoming : PhoneOutgoing;
+  // Referral payouts get a slightly different visual so they don't
+  // blur into call-incoming rows: amber tint instead of emerald, and
+  // a "REFERRAL" label in place of "INCOMING".
+  const iconBg = isReferral
+    ? 'bg-amber-100 text-amber-700'
+    : isIn
+    ? 'bg-emerald-100 text-emerald-700'
+    : 'bg-rose-100 text-rose-700';
+  const Icon = isReferral ? Wallet : isIn ? PhoneIncoming : PhoneOutgoing;
 
   const peer = t.peer;
   const peerName = peer?.displayName || peer?.username || 'Unknown';
@@ -1166,27 +1270,37 @@ function TransactionRow({ t }) {
               <span>{peerName}</span>
             )}
           </p>
-          <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-500 shrink-0">
-            {isIn ? 'Incoming' : 'Outgoing'}
+          <span
+            className={`text-[10px] font-bold uppercase tracking-wide shrink-0 ${
+              isReferral ? 'text-amber-700' : 'text-neutral-500'
+            }`}
+          >
+            {isReferral ? 'Referral' : isIn ? 'Incoming' : 'Outgoing'}
           </span>
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-neutral-500">
-          <span>{fmtDuration(t.durationSec)}</span>
-          {t.perMinuteRate > 0 && (
-            <>
-              <span>·</span>
-              <span>{fmtCredits(t.perMinuteRate)} cr/min</span>
-            </>
-          )}
-          {t.endReason && t.endReason !== 'hangup' && (
-            <>
-              <span>·</span>
-              <span className="inline-flex items-center gap-0.5 text-rose-500">
-                <PhoneOff size={10} /> {humanReason(t.endReason)}
-              </span>
-            </>
-          )}
-        </div>
+        {isReferral ? (
+          <p className="mt-0.5 text-[11px] text-neutral-500">
+            10% from {peer?.username ? `@${peer.username}'s` : 'a friend\'s'} top-up
+          </p>
+        ) : (
+          <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-neutral-500">
+            <span>{fmtDuration(t.durationSec)}</span>
+            {t.perMinuteRate > 0 && (
+              <>
+                <span>·</span>
+                <span>{fmtCredits(t.perMinuteRate)} cr/min</span>
+              </>
+            )}
+            {t.endReason && t.endReason !== 'hangup' && (
+              <>
+                <span>·</span>
+                <span className="inline-flex items-center gap-0.5 text-rose-500">
+                  <PhoneOff size={10} /> {humanReason(t.endReason)}
+                </span>
+              </>
+            )}
+          </div>
+        )}
         <p className="text-[11px] text-neutral-400 mt-1">{fmtDate(t.at)}</p>
       </div>
 

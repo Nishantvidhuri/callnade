@@ -332,6 +332,22 @@ export default function Profile() {
         )}
       </div>
 
+      {/* Referral card — owner-only. Shows the user's own random
+          referral code, count of people they've referred, and lifetime
+          earnings. If the user was themselves referred by someone,
+          we ALSO render their referrer's @handle plus a payout-sent
+          history (how much went to their referrer, no top-up amounts
+          exposed). */}
+      {isMe && me?.referralCode && (
+        <ReferralCard
+          code={me.referralCode}
+          referralCount={me.referralCount || 0}
+          referralEarnings={me.referralEarnings || 0}
+          referralWalletBalance={me.referralWalletBalance || 0}
+          referrer={me.referrer || null}
+        />
+      )}
+
       {/* Inline settings — only the owner can see this, only when "Edit
           profile" is toggled on. Settings page is merged into the profile
           here so there's no separate /settings destination. */}
@@ -604,4 +620,263 @@ function format(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
+}
+
+/**
+ * Owner-only card on the profile page. Shows the user's randomly-
+ * generated referral code (assigned at signup), the count of people
+ * they've referred, and lifetime credits earned via referrals. Each
+ * top-up by a referred user pays the referrer 10% automatically.
+ */
+function ReferralCard({ code, referralCount, referralEarnings, referralWalletBalance, referrer }) {
+  const [copied, setCopied] = useState(null); // 'code' | 'link' | null
+  // Two histories: 'received' (you got money) and 'sent' (you triggered
+  // payouts to your referrer). Each lazy-loaded the first time the
+  // matching panel is expanded.
+  const [payouts, setPayouts] = useState({ received: [], sent: [] });
+  const [showHistory, setShowHistory] = useState({ received: false, sent: false });
+  const [loadingHistory, setLoadingHistory] = useState({ received: false, sent: false });
+
+  const loadHistory = async (direction) => {
+    if (payouts[direction].length || loadingHistory[direction]) {
+      setShowHistory((s) => ({ ...s, [direction]: !s[direction] }));
+      return;
+    }
+    setLoadingHistory((s) => ({ ...s, [direction]: true }));
+    try {
+      const { data } = await api.get('/wallet/referral-payouts', {
+        params: { limit: 30, direction },
+      });
+      setPayouts((p) => ({ ...p, [direction]: data.items || [] }));
+      setShowHistory((s) => ({ ...s, [direction]: true }));
+    } catch {
+      /* swallow — empty history is fine */
+    } finally {
+      setLoadingHistory((s) => ({ ...s, [direction]: false }));
+    }
+  };
+
+  const link =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/signup?ref=${encodeURIComponent(code)}`
+      : `/signup?ref=${encodeURIComponent(code)}`;
+
+  const copy = async (text, kind) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      setTimeout(() => setCopied(null), 1200);
+    } catch {
+      /* clipboard blocked */
+    }
+  };
+
+  const fmt = (n) =>
+    typeof n === 'number' && Number.isFinite(n)
+      ? Number.isInteger(n)
+        ? String(n)
+        : n.toFixed(2)
+      : '0';
+  const canWithdraw = (referralWalletBalance || 0) >= 1;
+
+  return (
+    <section className="mb-6 rounded-2xl bg-white border border-neutral-200 p-4 sm:p-5">
+      {/* Title row */}
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <h2 className="font-bold text-sm tracking-tight">Refer & earn</h2>
+        <span className="text-[11px] text-neutral-500">10% of friends' top-ups</span>
+      </div>
+
+      {/* Three small inline stats. Wraps to two-up on very narrow
+          screens via flex-wrap; collapses cleanly without the boxy
+          colored tiles the previous version had. */}
+      <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1.5 mb-4">
+        <div className="min-w-0">
+          <dt className="text-[10px] uppercase tracking-wide font-bold text-neutral-500">
+            Referrals
+          </dt>
+          <dd className="text-base font-bold tabular-nums text-ink">{referralCount}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[10px] uppercase tracking-wide font-bold text-neutral-500">
+            Lifetime
+          </dt>
+          <dd className="text-base font-bold tabular-nums text-emerald-700">
+            ₹{fmt(referralEarnings)}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[10px] uppercase tracking-wide font-bold text-neutral-500">
+            Withdrawable
+          </dt>
+          <dd className="text-base font-bold tabular-nums text-amber-700">
+            ₹{fmt(referralWalletBalance)}
+          </dd>
+        </div>
+      </dl>
+
+      {/* Code + actions. Mono code on a tinted pill, primary action
+          (Copy) right next to it. The full URL row lives below as a
+          secondary action — only the code matters at a glance. */}
+      <div className="flex items-center gap-2 mb-2">
+        <code className="flex-1 min-w-0 px-3 py-2 text-sm font-mono tracking-wider rounded-lg bg-neutral-50 border border-neutral-200 text-ink truncate">
+          {code}
+        </code>
+        <button
+          type="button"
+          onClick={() => copy(code, 'code')}
+          aria-label="Copy referral code"
+          className="px-3 py-2 text-xs font-bold rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 transition shrink-0"
+        >
+          {copied === 'code' ? '✓' : 'Copy'}
+        </button>
+        <button
+          type="button"
+          onClick={() => copy(link, 'link')}
+          aria-label="Copy referral link"
+          className="px-3 py-2 text-xs font-semibold rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 transition shrink-0"
+        >
+          {copied === 'link' ? '✓' : 'Link'}
+        </button>
+      </div>
+
+      {/* Withdraw — only renders when there's actually something to
+          take out, so the card doesn't push a dead button at zero. */}
+      {canWithdraw && (
+        <Link
+          to="/billing?withdraw=referral"
+          className="mt-3 inline-flex items-center justify-center gap-1.5 w-full px-4 py-2 text-xs font-bold rounded-full text-white bg-amber-500 hover:bg-amber-600 shadow-sm transition"
+        >
+          Withdraw ₹{fmt(referralWalletBalance)}
+        </Link>
+      )}
+
+      {/* Earnings history (RECEIVED). Credits THIS user got from
+          friends' top-ups. Source top-up amount intentionally absent. */}
+      <div className="mt-4 pt-4 border-t border-neutral-100">
+        <button
+          type="button"
+          onClick={() => loadHistory('received')}
+          className="text-xs font-semibold text-emerald-700 hover:underline inline-flex items-center gap-1"
+        >
+          {showHistory.received ? '▾' : '▸'}{' '}
+          {showHistory.received ? 'Hide payouts to me' : 'Show payouts to me'}
+          {loadingHistory.received && <span className="text-neutral-400">· loading…</span>}
+        </button>
+
+        {showHistory.received && (
+          <div className="mt-3">
+            {payouts.received.length === 0 ? (
+              <p className="text-xs text-neutral-500 py-3 text-center">
+                No referral payouts yet — share your code to start earning.
+              </p>
+            ) : (
+              <ul className="rounded-2xl border border-neutral-200 divide-y divide-neutral-100 overflow-hidden bg-white">
+                {payouts.received.map((p) => (
+                  <PayoutRow key={p.id} p={p} sign="+" tone="emerald" />
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Referrer block — only shows if THIS user was referred by
+          someone. Surfaces who their referrer is + a history of
+          payouts that went to the referrer because of THIS user's
+          top-ups. The user sees only the payout amount sent (10% of
+          their own recharge), never any back-derivation of the
+          referrer's wider wallet activity. */}
+      {referrer && (
+        <div className="mt-4 pt-4 border-t border-neutral-100">
+          <p className="text-xs text-neutral-500">
+            Referred by{' '}
+            <Link
+              to={`/u/${referrer.username}`}
+              className="font-semibold text-ink hover:underline"
+            >
+              @{referrer.username}
+            </Link>
+          </p>
+          <button
+            type="button"
+            onClick={() => loadHistory('sent')}
+            className="mt-1.5 text-xs font-semibold text-amber-700 hover:underline inline-flex items-center gap-1"
+          >
+            {showHistory.sent ? '▾' : '▸'}{' '}
+            {showHistory.sent ? `Hide payouts to @${referrer.username}` : `Show payouts to @${referrer.username}`}
+            {loadingHistory.sent && <span className="text-neutral-400">· loading…</span>}
+          </button>
+
+          {showHistory.sent && (
+            <div className="mt-3">
+              {payouts.sent.length === 0 ? (
+                <p className="text-xs text-neutral-500 py-3 text-center">
+                  No payouts triggered yet — they'll appear here once your
+                  top-ups are approved.
+                </p>
+              ) : (
+                <ul className="rounded-2xl border border-neutral-200 divide-y divide-neutral-100 overflow-hidden bg-white">
+                  {payouts.sent.map((p) => (
+                    <PayoutRow key={p.id} p={p} sign="→" tone="amber" />
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * One row in either history list. The peer's username is whoever's on
+ * the OTHER side of the payout (referee for received, referrer for
+ * sent). Only the payout amount renders — never the source top-up.
+ */
+function PayoutRow({ p, sign, tone }) {
+  const cls =
+    tone === 'amber' ? 'text-amber-700' : 'text-emerald-700';
+  // Signup bonus rows tell a different story than the regular 10%
+  // top-up payouts — label them so the user can see which is which.
+  const isSignup = p.kind === 'signup';
+  const titleText = isSignup
+    ? p.peerUsername
+      ? `Signup bonus · @${p.peerUsername}`
+      : 'Signup bonus'
+    : p.peerUsername
+    ? `@${p.peerUsername}`
+    : 'Referral';
+  return (
+    <li className="flex items-center justify-between px-3 py-2.5 text-xs">
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-ink truncate">{titleText}</p>
+        <p className="text-[11px] text-neutral-500">
+          {isSignup && (
+            <span className="inline-block mr-1.5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide rounded bg-emerald-100 text-emerald-700 align-middle">
+              from referral
+            </span>
+          )}
+          {fmtPayoutDate(p.createdAt)}
+        </p>
+      </div>
+      <span className={`font-bold tabular-nums shrink-0 ${cls}`}>
+        {sign}
+        {p.amount}
+      </span>
+    </li>
+  );
+}
+
+function fmtPayoutDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }

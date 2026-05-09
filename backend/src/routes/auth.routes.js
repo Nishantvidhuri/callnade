@@ -28,6 +28,10 @@ const signupSchema = z.object({
       acceptedAt: z.string(),
       version: z.string().max(32).nullable().optional(),
     }),
+    // Optional referral code (the referrer's username). Loose
+    // validation here — the service does the actual lookup and
+    // silently ignores anything that doesn't resolve.
+    referralCode: z.string().max(32).optional(),
   }),
 });
 
@@ -38,7 +42,14 @@ const loginSchema = z.object({
   }),
 });
 
+const googleSchema = z.object({
+  body: z.object({
+    idToken: z.string().min(1),
+  }),
+});
+
 router.post('/signup', authLimiter, validate(signupSchema), asyncHandler(auth.signup));
 router.post('/login', authLimiter, validate(loginSchema), asyncHandler(auth.login));
+router.post('/google', authLimiter, validate(googleSchema), asyncHandler(auth.googleLogin));
 router.post('/refresh', asyncHandler(auth.refresh));
 router.post('/logout', requireAuth, asyncHandler(auth.logout));

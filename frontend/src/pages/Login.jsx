@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Check } from 'lucide-react';
 import { api } from '../services/api.js';
+import { googleSignIn } from '../services/google.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import AuthLayout from '../components/AuthLayout.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
@@ -14,7 +15,6 @@ const ctaCls =
 
 export default function Login() {
   const nav = useNavigate();
-  const loc = useLocation();
   const [form, setForm] = useState({ email: '', password: '' });
   const [agree, setAgree] = useState(true);
   const [error, setError] = useState(null);
@@ -28,9 +28,33 @@ export default function Login() {
     try {
       const { data } = await api.post('/auth/login', form);
       useAuthStore.getState().setAuth(data);
-      nav(loc.state?.from?.pathname || '/', { replace: true });
+      // Always land on home after login. Previously we honored
+      // `loc.state.from` (the page they were trying to reach when
+      // RequireAuth bounced them here) — but the product wants the
+      // home tab as the post-login starting point regardless.
+      nav('/', { replace: true });
     } catch (err) {
       setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogle = async () => {
+    if (!agree) return setError('Please accept the Terms to continue.');
+    setError(null);
+    setLoading(true);
+    try {
+      const idToken = await googleSignIn();
+      const { data } = await api.post('/auth/google', { idToken });
+      useAuthStore.getState().setAuth(data);
+      // Always land on home after login. Previously we honored
+      // `loc.state.from` (the page they were trying to reach when
+      // RequireAuth bounced them here) — but the product wants the
+      // home tab as the post-login starting point regardless.
+      nav('/', { replace: true });
+    } catch (err) {
+      setError(err.message || 'Google sign-in failed');
     } finally {
       setLoading(false);
     }
@@ -92,7 +116,7 @@ export default function Login() {
         <Divider />
 
         <SocialButtons
-          onGoogle={() => setError('Google sign-in coming soon')}
+          onGoogle={handleGoogle}
           onFacebook={() => setError('Facebook sign-in coming soon')}
         />
       </form>

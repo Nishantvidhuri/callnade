@@ -45,10 +45,21 @@ const walletRequestSchema = new mongoose.Schema(
     //                  New rows write qrUrl only.
     //  - qrContentType: stays around for both paths so the admin
     //                  preview can hint the right MIME type.
+    //  - withdrawSource: which wallet the approved withdrawal will
+    //                  debit. 'earnings' (creator income, default
+    //                  for backward-compat with old rows) or
+    //                  'referral' (the referral wallet introduced
+    //                  for non-creators who only have referral
+    //                  payouts to withdraw).
     upiId: { type: String, default: null },
     qrUrl: { type: String, default: null },
     qrData: { type: Buffer, default: null, select: false },
     qrContentType: { type: String, default: null },
+    withdrawSource: {
+      type: String,
+      enum: ['earnings', 'referral'],
+      default: 'earnings',
+    },
 
     // Topup-only field. Manual top-ups require the user to paste the
     // UPI reference / transaction id from their bank app so the admin

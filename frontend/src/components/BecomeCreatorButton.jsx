@@ -19,7 +19,7 @@ export default function BecomeCreatorButton() {
 
   return (
     <button
-      onClick={() => nav('/signup?as=creator')}
+      onClick={() => nav('/signup')}
       className="
         fixed z-30 group
         left-1/2 -translate-x-1/2 lg:left-6 lg:translate-x-0

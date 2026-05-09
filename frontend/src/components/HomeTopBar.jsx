@@ -4,6 +4,7 @@ import { Search, X, Settings as SettingsIcon, Wallet } from 'lucide-react';
 import { useAuthStore } from '../stores/auth.store.js';
 import { fmtCredits } from '../utils/formatCredits.js';
 import NotificationDropdown from './NotificationDropdown.jsx';
+import ActiveToggle from './ActiveToggle.jsx';
 
 export default function HomeTopBar({ query, onQueryChange }) {
   const [open, setOpen] = useState(false);
@@ -48,6 +49,10 @@ export default function HomeTopBar({ query, onQueryChange }) {
       <CircleBtn onClick={toggle} ariaLabel={open ? 'Close search' : 'Search'}>
         {open ? <X size={18} strokeWidth={1.8} /> : <Search size={18} strokeWidth={1.8} />}
       </CircleBtn>
+
+      {/* Creator-only "Available" toggle. Hidden via the component
+          itself for non-providers, so unconditional mount is safe. */}
+      {!open && <ActiveToggle size="md" />}
 
       {!open && me && (() => {
         const isProvider = me.role === 'provider';

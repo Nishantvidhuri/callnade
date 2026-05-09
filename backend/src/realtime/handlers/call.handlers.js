@@ -166,7 +166,15 @@ async function startBillingTicker(io, callId) {
 
 async function endCall(callId, reason = 'hangup') {
   const c = calls.get(callId);
-  if (!c) return;
+  if (!c || c.ending) return;
+  // Re-entry guard: both peers' `call:hangup` events plus the server's
+  // own `call:ended` emit can all fire endCall(callId) concurrently.
+  // Without a synchronous flag set BEFORE the first await, every
+  // invocation clears the !c check (since `calls.delete(callId)` only
+  // happens at the bottom, after several awaits) and we end up
+  // recording the same CallSession twice. Setting `ending` before any
+  // await makes subsequent calls bail immediately.
+  c.ending = true;
   // Stop the per-second ticker first so no more ticks fire after the
   // final flush below.
   if (c.billTimer) {
