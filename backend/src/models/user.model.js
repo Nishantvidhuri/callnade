@@ -52,13 +52,12 @@ const userSchema = new mongoose.Schema(
     // Google OAuth sub (the immutable Google account id). Set on
     // accounts that signed up / linked via Sign-in-with-Google. We
     // also keep email-based lookup so a user can use either method.
-    googleId: {
-      type: String,
-      default: null,
-      unique: true,
-      sparse: true,
-      index: true,
-    },
+    //
+    // No `default: null` — the field is left unset for non-Google
+    // signups. Combined with the partial-filter unique index defined
+    // below, this prevents the "every null collides" bug a sparse
+    // index has when documents explicitly store `null`.
+    googleId: { type: String },
     dateOfBirth: { type: Date, default: null },
     // Provider-set flag — when true the creator is listed in the "18+"
     // section instead of the normal Discover tab. Indexed for fast
@@ -121,6 +120,19 @@ const userSchema = new mongoose.Schema(
     referralWalletBalance: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
+);
+
+// Partial unique index on googleId — only documents where googleId is
+// an actual string get indexed. Missing / null docs are ignored, so
+// every non-Google account can coexist without colliding on the
+// unique constraint. (Plain `sparse: true` doesn't work here because
+// MongoDB sparse indexes still include explicitly-null values.)
+userSchema.index(
+  { googleId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { googleId: { $type: 'string' } },
+  },
 );
 
 userSchema.set('toJSON', {
