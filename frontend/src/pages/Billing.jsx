@@ -659,6 +659,10 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
   // they're typing; refreshed on the next time the modal opens.
   const [qrUrl, setQrUrl] = useState(PAYMENT_QR_FALLBACK);
   const [qrUpiId, setQrUpiId] = useState(MERCHANT_UPI_ID);
+  // `qrLoading` covers BOTH the API fetch (resolving which QR to
+  // show) and the image load (decoding the bytes from R2/CDN). Stays
+  // true until the <img> emits onLoad — only then do we unhide it.
+  const [qrLoading, setQrLoading] = useState(true);
   // Brief ✓ flash on the Copy button for confirmation.
   const [upiCopied, setUpiCopied] = useState(false);
   useEffect(() => {
@@ -667,13 +671,19 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
       .get('/wallet/payment-qr')
       .then((r) => {
         if (cancelled) return;
-        if (r.data?.url) setQrUrl(r.data.url);
+        if (r.data?.url && r.data.url !== qrUrl) {
+          // Swap to the picked URL — keep the loader on so the user
+          // sees the spinner until the new image is fully decoded.
+          setQrLoading(true);
+          setQrUrl(r.data.url);
+        }
         if (r.data?.upiId) setQrUpiId(r.data.upiId);
       })
       .catch(() => {
-        /* keep the hardcoded fallback */
+        /* keep the hardcoded fallback (and let it load) */
       });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const screenshotInput = useRef(null);
 
@@ -780,14 +790,38 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
           <button
             type="button"
             onClick={() => setZoomed(true)}
+            disabled={qrLoading}
             className="relative block w-full group"
             aria-label="Expand QR"
           >
-            <img
-              src={qrUrl}
-              alt="callnade payment QR"
-              className="w-full max-w-[260px] mx-auto rounded-xl bg-white border border-neutral-200"
-            />
+            {/* Reserved-aspect square so the layout doesn't reflow when
+                the image arrives. The loader sits centered behind the
+                image; the image fades in over it via opacity transition
+                once it's decoded. */}
+            <div className="relative w-full max-w-[260px] mx-auto aspect-square rounded-xl bg-neutral-50 border border-neutral-200 overflow-hidden">
+              {qrLoading && (
+                <div className="absolute inset-0 grid place-items-center text-neutral-400">
+                  <div className="flex flex-col items-center gap-2">
+                    <span
+                      className="w-9 h-9 rounded-full border-[3px] border-emerald-200 border-t-emerald-500 animate-spin"
+                      aria-hidden="true"
+                    />
+                    <span className="text-[11px] font-semibold text-neutral-500">
+                      Loading QR…
+                    </span>
+                  </div>
+                </div>
+              )}
+              <img
+                src={qrUrl}
+                alt="callnade payment QR"
+                onLoad={() => setQrLoading(false)}
+                onError={() => setQrLoading(false)}
+                className={`w-full h-full object-contain transition-opacity duration-200 ${
+                  qrLoading ? 'opacity-0' : 'opacity-100'
+                }`}
+              />
+            </div>
             <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-full bg-black/70 text-white opacity-0 group-hover:opacity-100 transition">
               Tap to expand
             </span>
