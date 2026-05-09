@@ -75,3 +75,6 @@ router.post('/withdraw', requireAuth, uploadLimiter, qrBody, asyncHandler(wallet
 
 router.get('/requests', requireAuth, asyncHandler(wallet.myRequests));
 router.get('/referral-payouts', requireAuth, asyncHandler(wallet.myReferralPayouts));
+// Public-but-auth'd: returns one random active payment QR for the
+// topup page to display. Picks a fresh one on every page load.
+router.get('/payment-qr', requireAuth, asyncHandler(wallet.paymentQr));

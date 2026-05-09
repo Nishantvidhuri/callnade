@@ -198,6 +198,12 @@ export default function Admin() {
                 <Wallet size={13} /> <span className="hidden sm:inline">Wallet</span>
               </Link>
               <Link
+                to="/admin/payment-qrs"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition"
+              >
+                <FileText size={13} /> <span className="hidden sm:inline">QRs</span>
+              </Link>
+              <Link
                 to="/admin/visits"
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition"
               >

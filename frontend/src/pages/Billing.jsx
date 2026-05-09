@@ -18,7 +18,10 @@ import { fmtCredits } from '../utils/formatCredits.js';
 // we're running a manual reconciliation flow: user pays via UPI by
 // scanning this QR, then pastes the bank reference into the form so
 // an admin can match + credit the wallet.
-const PAYMENT_QR_URL =
+// Hardcoded fallback used when the admin pool is empty or the
+// /wallet/payment-qr fetch fails. The live page picks one at random
+// from the admin-managed pool (see AdminPaymentQrs).
+const PAYMENT_QR_FALLBACK =
   'https://assetscdn1.paytm.com/images/catalog/product/F/FU/FULUN-MAPPED-SOSOUN117245820429677/1629993190693_3.jpg';
 const MERCHANT_NAME = 'callnade pvt ltd';
 const MERCHANT_UPI_ID = 'callnade@paytm';
@@ -645,13 +648,33 @@ function ActionModal({ mode, balance, onClose, onSuccess, user }) {
 function AddCreditsForm({ balance, onClose, onSuccess }) {
   const [amount, setAmount] = useState(100);
   const [referenceId, setReferenceId] = useState('');
-  const [payerUpiId, setPayerUpiId] = useState('');
   const [screenshotFile, setScreenshotFile] = useState(null);
   const [screenshotPreview, setScreenshotPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  // Pick one QR from the admin-managed pool on mount. Stable for the
+  // life of this form so a user doesn't see the QR change while
+  // they're typing; refreshed on the next time the modal opens.
+  const [qrUrl, setQrUrl] = useState(PAYMENT_QR_FALLBACK);
+  const [qrUpiId, setQrUpiId] = useState(MERCHANT_UPI_ID);
+  // Brief ✓ flash on the Copy button for confirmation.
+  const [upiCopied, setUpiCopied] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get('/wallet/payment-qr')
+      .then((r) => {
+        if (cancelled) return;
+        if (r.data?.url) setQrUrl(r.data.url);
+        if (r.data?.upiId) setQrUpiId(r.data.upiId);
+      })
+      .catch(() => {
+        /* keep the hardcoded fallback */
+      });
+    return () => { cancelled = true; };
+  }, []);
   const screenshotInput = useRef(null);
 
   // Revoke the preview blob URL when the file changes / unmounts so
@@ -681,14 +704,8 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
 
   const num = Number(amount) || 0;
   const ref = referenceId.trim();
-  const payer = payerUpiId.trim();
   const refLooksValid = ref.length >= 6 && ref.length <= 64 && /^[A-Za-z0-9_\-]+$/.test(ref);
-  // Same loose check the backend does: either VPA-style (name@bank) or
-  // a phone number we'll auto-suffix server-side.
-  const payerLooksValid =
-    /@/.test(payer) || /^\d{10,13}$/.test(payer.replace(/[\s+\-]/g, ''));
-  const canSubmit =
-    num >= 1 && refLooksValid && payerLooksValid && !submitting && !done;
+  const canSubmit = num >= 1 && refLooksValid && !submitting && !done;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -701,10 +718,6 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
       setError('Reference id should be 6–64 letters/digits');
       return;
     }
-    if (!payerLooksValid) {
-      setError('Enter the UPI ID you paid from (e.g. yourname@paytm)');
-      return;
-    }
     setSubmitting(true);
     try {
       if (screenshotFile) {
@@ -715,7 +728,6 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
           params: {
             amount: num,
             referenceId: ref,
-            payerUpiId: payer,
           },
           headers: { 'Content-Type': screenshotFile.type },
           transformRequest: [(d) => d], // skip JSON serialization
@@ -724,7 +736,6 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
         await api.post('/wallet/topup', {
           amount: num,
           referenceId: ref,
-          payerUpiId: payer,
         });
       }
       setDone(true);
@@ -773,7 +784,7 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
             aria-label="Expand QR"
           >
             <img
-              src={PAYMENT_QR_URL}
+              src={qrUrl}
               alt="callnade payment QR"
               className="w-full max-w-[260px] mx-auto rounded-xl bg-white border border-neutral-200"
             />
@@ -781,6 +792,36 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
               Tap to expand
             </span>
           </button>
+          {/* UPI ID associated with this particular QR — picked from
+              the admin pool. Mono pill on the left, dedicated Copy
+              button on the right with a ✓ flash on success. */}
+          {qrUpiId && (
+            <div className="mt-3 flex items-center gap-2">
+              <div className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 rounded-xl bg-neutral-50 border border-neutral-200">
+                <span className="text-[10px] uppercase tracking-wide font-bold text-neutral-500 shrink-0">
+                  UPI ID
+                </span>
+                <code className="font-mono text-sm text-ink truncate min-w-0">
+                  {qrUpiId}
+                </code>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(qrUpiId);
+                    setUpiCopied(true);
+                    setTimeout(() => setUpiCopied(false), 1500);
+                  } catch {
+                    /* clipboard blocked — silent */
+                  }
+                }}
+                className="px-3 py-2 text-xs font-bold rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 shadow-sm transition shrink-0"
+              >
+                {upiCopied ? '✓ Copied' : 'Copy'}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="rounded-2xl bg-neutral-50 border border-neutral-200 p-3.5">
@@ -829,25 +870,6 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
           </div>
         </label>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-bold uppercase tracking-wide text-neutral-700">
-            Your UPI ID (paying from)
-          </span>
-          <input
-            type="text"
-            value={payerUpiId}
-            onChange={(e) => setPayerUpiId(e.target.value)}
-            placeholder="yourname@paytm or 9999999999"
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            className="w-full px-4 py-2.5 text-sm rounded-full bg-white border border-neutral-300 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition font-mono"
-          />
-          <span className="text-[11px] text-neutral-500 leading-snug">
-            The UPI handle you used to pay from. Helps us match your
-            transfer faster.
-          </span>
-        </label>
 
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-bold uppercase tracking-wide text-neutral-700">
@@ -974,12 +996,12 @@ function AddCreditsForm({ balance, onClose, onSuccess }) {
           </button>
           <div onClick={(e) => e.stopPropagation()} className="text-center max-w-md w-full">
             <img
-              src={PAYMENT_QR_URL}
+              src={qrUrl}
               alt="callnade payment QR"
               className="w-full rounded-2xl bg-white p-4 shadow-2xl"
             />
             <p className="text-white text-sm font-semibold mt-3">{MERCHANT_NAME}</p>
-            <p className="text-white/70 font-mono text-sm mt-0.5">{MERCHANT_UPI_ID}</p>
+            <p className="text-white/70 font-mono text-sm mt-0.5">{qrUpiId}</p>
             <p className="text-white/50 text-xs mt-3">Tap anywhere to close</p>
           </div>
         </div>

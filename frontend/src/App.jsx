@@ -21,6 +21,7 @@ import Notifications from './pages/Notifications.jsx';
 import Admin from './pages/Admin.jsx';
 import AdminVisits from './pages/AdminVisits.jsx';
 import AdminWalletRequests from './pages/AdminWalletRequests.jsx';
+import AdminPaymentQrs from './pages/AdminPaymentQrs.jsx';
 import Billing from './pages/Billing.jsx';
 import Call from './pages/Call.jsx';
 import IncomingCall from './pages/IncomingCall.jsx';
@@ -80,6 +81,7 @@ export default function App() {
         <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
         <Route path="/admin/visits" element={<RequireAuth><AdminVisits /></RequireAuth>} />
         <Route path="/admin/wallet-requests" element={<RequireAuth><AdminWalletRequests /></RequireAuth>} />
+        <Route path="/admin/payment-qrs" element={<RequireAuth><AdminPaymentQrs /></RequireAuth>} />
         <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
         <Route path="/settings" element={<RequireAuth><SettingsRedirect /></RequireAuth>} />
         <Route path="/call/:peerId" element={<RequireAuth><Call /></RequireAuth>} />

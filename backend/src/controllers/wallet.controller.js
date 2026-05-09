@@ -1,4 +1,5 @@
 import * as walletService from '../services/wallet.service.js';
+import * as paymentQrService from '../services/paymentQr.service.js';
 
 /**
  * Top-up flow accepts EITHER:
@@ -57,6 +58,10 @@ export async function withdraw(req, res) {
 
 export async function myRequests(req, res) {
   res.json(await walletService.listMyRequests(req.user.id));
+}
+
+export async function paymentQr(_req, res) {
+  res.json(await paymentQrService.pickRandomActiveQr());
 }
 
 export async function myReferralPayouts(req, res) {

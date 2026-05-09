@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -64,3 +65,22 @@ router.post('/wallet-requests/:requestId/approve-topup', validate(walletRequestA
 router.post('/wallet-requests/:requestId/approve-withdraw', validate(walletRequestActionSchema), asyncHandler(admin.approveWithdraw));
 router.post('/wallet-requests/:requestId/reject', validate(walletRequestActionSchema), asyncHandler(admin.rejectWalletRequest));
 router.get('/wallet-requests/:requestId/qr', asyncHandler(admin.withdrawQr));
+
+// Payment-QR pool. The user-side topup page picks one of these at
+// random (see /wallet/payment-qr). Image bytes upload via raw body
+// so we reuse the same shape as the withdraw QR upload.
+const paymentQrToggleSchema = z.object({
+  body: z.object({ active: z.boolean() }),
+});
+const paymentQrBody = express.raw({
+  type: ['image/jpeg', 'image/png', 'image/webp'],
+  limit: '5mb',
+});
+router.get('/payment-qrs', asyncHandler(admin.listPaymentQrs));
+router.post('/payment-qrs', paymentQrBody, asyncHandler(admin.uploadPaymentQr));
+router.patch(
+  '/payment-qrs/:id',
+  validate(paymentQrToggleSchema),
+  asyncHandler(admin.togglePaymentQr),
+);
+router.delete('/payment-qrs/:id', asyncHandler(admin.deletePaymentQr));

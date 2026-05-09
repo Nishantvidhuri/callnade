@@ -1,5 +1,6 @@
 import * as adminService from '../services/admin.service.js';
 import * as walletService from '../services/wallet.service.js';
+import * as paymentQrService from '../services/paymentQr.service.js';
 import { notFound } from '../utils/HttpError.js';
 
 export async function listUsers(req, res) {
@@ -93,6 +94,34 @@ export async function rejectWalletRequest(req, res) {
       adminNote: req.body?.adminNote,
     }),
   );
+}
+
+/* Payment-QR pool (admin-managed, shown on user-side topup form). */
+
+export async function listPaymentQrs(_req, res) {
+  res.json(await paymentQrService.listPaymentQrs());
+}
+
+export async function uploadPaymentQr(req, res) {
+  res.json(
+    await paymentQrService.uploadPaymentQr({
+      buffer: req.body, // raw Buffer thanks to express.raw
+      contentType: req.headers['content-type'] || '',
+      label: req.query.label,
+      upiId: req.query.upiId,
+      uploadedBy: req.user.id,
+    }),
+  );
+}
+
+export async function togglePaymentQr(req, res) {
+  res.json(
+    await paymentQrService.setActive(req.params.id, req.body?.active),
+  );
+}
+
+export async function deletePaymentQr(req, res) {
+  res.json(await paymentQrService.deletePaymentQr(req.params.id));
 }
 
 export async function withdrawQr(req, res) {

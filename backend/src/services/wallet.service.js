@@ -117,14 +117,16 @@ export async function createTopupRequest(
     throw badRequest('Reference id must be letters, digits, dashes or underscores only');
   }
 
-  // Payer UPI handle ("paying from") — what the user pasted in for
-  // their own UPI id. We normalise the same way as withdrawal: must
-  // look like name@bank. Phone-only entries are auto-suffixed @paytm
-  // via resolveVpa() so users who only know their phone aren't
-  // blocked.
-  const payerVpa = resolveVpa(payerUpiId);
-  if (!payerVpa) {
-    throw badRequest('Enter the UPI ID you paid from (e.g. yourname@paytm)');
+  // Payer UPI handle ("paying from") — optional. When supplied we
+  // normalise it the same way as withdrawal (name@bank, or a phone
+  // we auto-suffix via resolveVpa). When the field's missing or
+  // bogus, we just store null — admins reconcile via the UTR ref +
+  // optional payment screenshot.
+  let payerVpa = null;
+  if (payerUpiId) {
+    payerVpa = resolveVpa(payerUpiId);
+    // Don't reject the topup just because the optional field is
+    // malformed — drop it silently rather than blocking the user.
   }
 
   // Block obvious replay: same user submitting the same reference id
