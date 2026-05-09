@@ -3,9 +3,27 @@ import { canMessage } from '../../services/follow.service.js';
 import { recordSession } from '../../services/call.service.js';
 import { Package } from '../../models/package.model.js';
 import { User } from '../../models/user.model.js';
+import { ReferralPayout } from '../../models/referralPayout.model.js';
 import { logger } from '../../config/logger.js';
 import { notifyUser } from '../io.js';
 import { subscriberPrice, PLATFORM_MARGIN } from '../../utils/pricing.js';
+import { WITHDRAW_FEE_RATE_EARNINGS } from '../../services/wallet.service.js';
+import {
+  setBusy,
+  clearBusy,
+  broadcastStatus,
+} from './presence.handlers.js';
+
+// Creator-referral bonus: when a creator signs up using someone's
+// referral code, the referrer earns 10% of that creator's per-call
+// earnings — but ONLY for the first 30 days from the creator's
+// signup. After the window closes the bonus stops cleanly.
+//
+// Both numbers are tunable here. The 30-day window is anchored to the
+// creator's createdAt (immutable after signup) so the cutoff can't be
+// reset by re-saving the user.
+const CREATOR_REFERRAL_RATE = 0.1;
+const CREATOR_REFERRAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 const calls = new Map();
 // callId → { callerId, calleeId, startedAt, connectedAt?, packageId?, perMinuteRate, totalBilled, billInterval? }
@@ -58,6 +76,27 @@ async function flushBilling(callId) {
   // Reset counters BEFORE awaiting so re-entrant ticks don't double-flush.
   c.unsavedBill = 0;
   c.unsavedEarn = 0;
+
+  // Creator-referral payout: if the creator was referred AND we're
+  // still inside the 30-day bonus window, route 10% of the creator's
+  // *net* (post-platform-fee) earnings to the referrer's referral
+  // wallet. NET is `earn × (1 − WITHDRAW_FEE_RATE_EARNINGS)` —
+  // matching what the creator would actually receive at withdrawal
+  // time. So for ₹100 gross, the referrer gets ₹100 × 0.8 × 0.1 = ₹8
+  // (not ₹10 off the gross). The DB write is a separate atomic $inc
+  // so the creator's ledger is never debited. Window is re-checked
+  // on every flush — once it expires mid-call, payouts stop cleanly.
+  let creatorReferralCut = 0;
+  const referralActive =
+    earn > 0 &&
+    c.creatorReferrerId &&
+    c.creatorReferralExpiresAt &&
+    Date.now() < c.creatorReferralExpiresAt;
+  if (referralActive) {
+    const netEarn = earn * (1 - WITHDRAW_FEE_RATE_EARNINGS);
+    creatorReferralCut = round2(netEarn * CREATOR_REFERRAL_RATE);
+  }
+
   try {
     await Promise.all([
       bill > 0
@@ -66,9 +105,25 @@ async function flushBilling(callId) {
       earn > 0
         ? User.updateOne({ _id: c.calleeId }, { $inc: { earningsBalance: earn } })
         : Promise.resolve(),
+      creatorReferralCut > 0
+        ? User.updateOne(
+            { _id: c.creatorReferrerId, deletedAt: null, banned: false },
+            {
+              $inc: {
+                referralWalletBalance: creatorReferralCut,
+                referralEarnings: creatorReferralCut,
+              },
+            },
+          )
+        : Promise.resolve(),
     ]);
     c.cachedCallerBalance = round2((c.cachedCallerBalance || 0) - bill);
     c.cachedCalleeBalance = round2((c.cachedCalleeBalance || 0) + earn);
+    if (creatorReferralCut > 0) {
+      c.creatorReferralAccrued = round2(
+        (c.creatorReferralAccrued || 0) + creatorReferralCut,
+      );
+    }
     c.lastFlushAt = Date.now();
   } catch (err) {
     // On flush failure, restore the counters so the next flush picks
@@ -113,7 +168,7 @@ async function billTick(io, callId) {
     io.to(room(callId)).emit('call:ended', { callId, reason: 'insufficient_credits' });
     io.to(userRoom(c.callerId)).emit('call:ended', { callId, reason: 'insufficient_credits' });
     io.to(userRoom(c.calleeId)).emit('call:ended', { callId, reason: 'insufficient_credits' });
-    await endCall(callId, 'insufficient_credits');
+    await endCall(io, callId, 'insufficient_credits');
     return;
   }
 
@@ -147,15 +202,37 @@ async function startBillingTicker(io, callId) {
   if (!c || !c.billRate || c.billTimer) return;
 
   // Seed cached balances so the live UI starts from the right number.
+  // Pull the creator's `referredBy` + `createdAt` in the same query so
+  // we can decide once-per-call whether the 30-day creator-referral
+  // bonus is still active. After this point every flush just checks
+  // `c.creatorReferralExpiresAt` against `Date.now()` — no extra reads.
   const [callerDoc, calleeDoc] = await Promise.all([
     User.findById(c.callerId).select('walletBalance').lean(),
-    User.findById(c.calleeId).select('earningsBalance').lean(),
+    User.findById(c.calleeId)
+      .select('earningsBalance referredBy createdAt')
+      .lean(),
   ]);
   c.cachedCallerBalance = round2(callerDoc?.walletBalance || 0);
   c.cachedCalleeBalance = round2(calleeDoc?.earningsBalance || 0);
   c.unsavedBill = 0;
   c.unsavedEarn = 0;
   c.lastFlushAt = Date.now();
+
+  // Creator-referral eligibility. We only care about live calls where
+  // the callee was referred and is still inside the bonus window. If
+  // the window has already lapsed at call-start we set nothing — the
+  // flush short-circuit handles the rest.
+  c.creatorReferrerId = null;
+  c.creatorReferralExpiresAt = 0;
+  c.creatorReferralAccrued = 0;
+  if (calleeDoc?.referredBy && calleeDoc?.createdAt) {
+    const expiresAt =
+      new Date(calleeDoc.createdAt).getTime() + CREATOR_REFERRAL_DURATION_MS;
+    if (expiresAt > Date.now()) {
+      c.creatorReferrerId = calleeDoc.referredBy;
+      c.creatorReferralExpiresAt = expiresAt;
+    }
+  }
 
   c.billTimer = setInterval(() => {
     billTick(io, callId).catch((err) =>
@@ -164,7 +241,7 @@ async function startBillingTicker(io, callId) {
   }, 1000);
 }
 
-async function endCall(callId, reason = 'hangup') {
+async function endCall(io, callId, reason = 'hangup') {
   const c = calls.get(callId);
   if (!c || c.ending) return;
   // Re-entry guard: both peers' `call:hangup` events plus the server's
@@ -193,6 +270,36 @@ async function endCall(callId, reason = 'hangup') {
   // Flush any unsaved billing one last time before we forget the
   // in-memory state. This is the durable record of the call's money.
   await flushBilling(callId);
+
+  // One ReferralPayout row per call (not per flush) so the referrer's
+  // history doesn't get spammed with 30-second slices. The cash itself
+  // already landed via $inc inside flushBilling — this row is purely
+  // for the audit trail / Profile history view. `walletRequestId`
+  // stays null (no top-up triggered this) and kind='creator-earn'
+  // distinguishes it from topup/signup rows.
+  if ((c.creatorReferralAccrued || 0) > 0 && c.creatorReferrerId) {
+    try {
+      await ReferralPayout.create({
+        userId: c.creatorReferrerId,
+        referredUserId: c.calleeId,
+        walletRequestId: null,
+        amount: c.creatorReferralAccrued,
+        kind: 'creator-earn',
+      });
+      logger.info(
+        {
+          callId,
+          referrerId: String(c.creatorReferrerId),
+          creatorId: String(c.calleeId),
+          amount: c.creatorReferralAccrued,
+        },
+        'creator referral payout',
+      );
+    } catch (err) {
+      logger.error({ err, callId }, 'failed to record creator referral payout');
+    }
+  }
+
   const endedAt = new Date();
   const durationSec = c.startedAt
     ? Math.floor((endedAt - new Date(c.startedAt)) / 1000)
@@ -213,6 +320,19 @@ async function endCall(callId, reason = 'hangup') {
   } catch (err) {
     logger.error({ err, callId }, 'failed to record call session');
   }
+
+  // Clear the in-call (busy) flags for both participants and rebroadcast
+  // their post-call status (online if their socket is still connected,
+  // offline otherwise — getStatus() figures that out).
+  await Promise.all([
+    clearBusy(c.callerId).catch(() => {}),
+    clearBusy(c.calleeId).catch(() => {}),
+  ]);
+  if (io) {
+    broadcastStatus(io, c.callerId).catch(() => {});
+    broadcastStatus(io, c.calleeId).catch(() => {});
+  }
+
   calls.delete(callId);
 }
 
@@ -298,6 +418,14 @@ export function registerCallHandlers(io, socket) {
     socket.join(room(callId));
     io.to(userRoom(c.callerId)).emit('call:accepted', { callId });
 
+    // Mark both peers busy so their presence dot turns red on every
+    // other client's UI. Fire-and-forget — Redis hiccups shouldn't
+    // block the call from proceeding.
+    setBusy(c.callerId, callId).catch(() => {});
+    setBusy(c.calleeId, callId).catch(() => {});
+    broadcastStatus(io, c.callerId).catch(() => {});
+    broadcastStatus(io, c.calleeId).catch(() => {});
+
     if (c.billRate > 0 && !c.billTimer) {
       // 1Hz ticker — UI updates every second, DB flushes every 30s
       // (and on call end). See startBillingTicker.
@@ -315,7 +443,7 @@ export function registerCallHandlers(io, socket) {
     if (String(c.calleeId) !== String(socket.user.id)) return;
     io.to(userRoom(c.callerId)).emit('call:rejected', { callId });
     io.to(userRoom(c.calleeId)).emit('call:rejected', { callId });
-    await endCall(callId, 'rejected');
+    await endCall(io, callId, 'rejected');
   });
 
   socket.on('rtc:ready', ({ callId }) => {
@@ -345,7 +473,7 @@ export function registerCallHandlers(io, socket) {
     io.to(room(callId)).emit('call:ended', { callId });
     io.to(userRoom(c.callerId)).emit('call:ended', { callId });
     io.to(userRoom(c.calleeId)).emit('call:ended', { callId });
-    await endCall(callId, 'hangup');
+    await endCall(io, callId, 'hangup');
   });
 
   // ─── Admin spectator (silent moderation join) ────────────────────────────

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X, ShieldCheck, Camera, FileText, Download, AlertTriangle } from 'lucide-react';
 import { api } from '../services/api.js';
+import ConsentDocument from './ConsentDocument.jsx';
 
 /**
  * Admin-only detail panel for a single user. Loads user info plus
@@ -170,33 +171,37 @@ export default function AdminUserDetailModal({ userId, onClose }) {
                   </Field>
                 </div>
 
-                {/* PDF preview */}
-                {data.consent.hasPdf && pdfUrl ? (
-                  <div className="border-t border-neutral-200">
-                    <iframe
-                      src={pdfUrl}
-                      title="Consent PDF"
-                      className="w-full h-[60dvh] bg-white"
-                    />
+                {/* Consent agreement rendered fully on the client.
+                    The backend PDF stays the canonical archived
+                    record (download link below); this view is what
+                    the admin actually reads in-page. */}
+                <div className="border-t border-neutral-200">
+                  <ConsentDocument
+                    user={{
+                      _id: data._id || data.id,
+                      username: data.username,
+                      email: data.email,
+                    }}
+                    consent={data.consent}
+                  />
+                  {data.consent.hasPdf && (
                     <div className="px-4 py-2.5 border-t border-neutral-200 flex items-center justify-end">
-                      <a
-                        href={pdfUrl}
-                        download={`consent-${data.username}.pdf`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full bg-ink text-white hover:bg-neutral-800 transition"
-                      >
-                        <Download size={12} /> Download PDF
-                      </a>
+                      {pdfUrl ? (
+                        <a
+                          href={pdfUrl}
+                          download={`consent-${data.username}.pdf`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full bg-ink text-white hover:bg-neutral-800 transition"
+                        >
+                          <Download size={12} /> Download archived PDF
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-neutral-400">
+                          Preparing PDF download…
+                        </span>
+                      )}
                     </div>
-                  </div>
-                ) : data.consent.hasPdf ? (
-                  <p className="px-4 py-6 text-center text-sm text-neutral-400 border-t border-neutral-200">
-                    Loading PDF…
-                  </p>
-                ) : (
-                  <p className="px-4 py-6 text-center text-sm text-neutral-500 border-t border-neutral-200">
-                    No PDF on record (account predates PDF generation).
-                  </p>
-                )}
+                  )}
+                </div>
               </div>
             )}
           </section>

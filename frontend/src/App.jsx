@@ -4,6 +4,7 @@ import { useAuth, bootstrapAuth } from './hooks/useAuth.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import { useIncomingCalls } from './hooks/useIncomingCalls.js';
 import { useWalletSync } from './hooks/useWalletSync.js';
+import { usePresenceSync } from './hooks/usePresenceSync.js';
 import { forceLogVisit } from './services/visit.js';
 import RequireAuth from './components/RequireAuth.jsx';
 import LoginPromptModal from './components/LoginPromptModal.jsx';
@@ -45,10 +46,28 @@ export default function App() {
   useNotifications();
   useIncomingCalls();
   useWalletSync();
+  usePresenceSync();
 
   useEffect(() => {
     bootstrapAuth().finally(() => setBooted(true));
   }, []);
+
+  // Fade out the index.html splash once auth has bootstrapped — the
+  // logo stays put while we hydrate the user, instead of flashing a
+  // generic spinner. Two rAFs so the routed page has a frame to paint
+  // before the cross-fade starts.
+  useEffect(() => {
+    if (!booted) return;
+    const splash = document.getElementById('splash');
+    if (!splash) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        splash.classList.add('is-hidden');
+        // Match the CSS transition (320ms in index.html); +40ms slack.
+        setTimeout(() => splash.remove(), 360);
+      });
+    });
+  }, [booted]);
 
   // Fire a visit log on every navigation (and on the very first load
   // once auth has booted, so the row reflects the right userId when the
@@ -60,13 +79,11 @@ export default function App() {
     forceLogVisit();
   }, [booted, user?._id, loc.pathname]);
 
-  if (!booted) {
-    return (
-      <div className="min-h-[100dvh] grid place-items-center bg-[#fff5f9]">
-        <div className="w-10 h-10 rounded-full border-4 border-pink-200 border-t-brand-500 animate-spin" />
-      </div>
-    );
-  }
+  // Pre-boot: render nothing. The index.html splash (#splash) is still
+  // covering the viewport, and the effect above will fade it out as
+  // soon as `booted` flips true. Returning null here avoids a flash of
+  // blank app chrome behind the splash.
+  if (!booted) return null;
 
   return (
     <>

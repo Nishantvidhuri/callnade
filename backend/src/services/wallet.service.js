@@ -429,17 +429,38 @@ export async function createWithdrawRequest(
     userId: String(userId),
   });
 
+  // Per-source platform fee. Creators withdrawing earnings pay 20%;
+  // referral-wallet withdrawals are full payout. Stored on the row
+  // so the admin (and the user's history view) can show the
+  // breakdown without the constants drifting later.
+  const feeRate =
+    withdrawSource === 'referral'
+      ? WITHDRAW_FEE_RATE_REFERRAL
+      : WITHDRAW_FEE_RATE_EARNINGS;
+  const fee = round2(amt * feeRate);
+  const netAmount = round2(amt - fee);
+
   const doc = await WalletRequest.create({
     userId,
     type: 'withdraw',
-    amount: amt,
+    amount: amt, // GROSS — debited from earningsBalance / referralWalletBalance
     upiId: upi,
     qrUrl,
     qrContentType,
     withdrawSource,
+    feeRate,
     status: 'pending',
   });
-  return { id: String(doc._id), status: doc.status, qrUrl, withdrawSource };
+  return {
+    id: String(doc._id),
+    status: doc.status,
+    qrUrl,
+    withdrawSource,
+    grossAmount: amt,
+    fee,
+    netAmount,
+    feeRate,
+  };
 }
 
 /**
@@ -470,6 +491,14 @@ export async function listMyRequests(userId) {
       qrUrl: r.qrUrl || null,
       hasQr: !!(r.qrUrl || r.qrContentType),
       withdrawSource: r.withdrawSource || (r.type === 'withdraw' ? 'earnings' : null),
+      // Fee + net are inlined so callers don't need to know the
+      // current rate constants. amount is gross (debited from the
+      // user); netAmount is what the admin actually pays out via UPI.
+      feeRate: r.feeRate || 0,
+      netAmount:
+        r.type === 'withdraw'
+          ? Math.round((r.amount || 0) * (1 - (r.feeRate || 0)) * 100) / 100
+          : null,
       status: r.status,
       adminNote: r.adminNote,
       createdAt: r.createdAt,
@@ -550,6 +579,14 @@ export async function adminListWalletRequests({ type, status, cursor, limit = 30
       qrUrl: r.qrUrl || null,
       hasQr: !!(r.qrUrl || r.qrContentType),
       withdrawSource: r.withdrawSource || (r.type === 'withdraw' ? 'earnings' : null),
+      // Fee + net are inlined so callers don't need to know the
+      // current rate constants. amount is gross (debited from the
+      // user); netAmount is what the admin actually pays out via UPI.
+      feeRate: r.feeRate || 0,
+      netAmount:
+        r.type === 'withdraw'
+          ? Math.round((r.amount || 0) * (1 - (r.feeRate || 0)) * 100) / 100
+          : null,
       // Gateway markers (only set for Razorpay flows):
       gatewayOrderId: r.gatewayOrderId,
       gatewayPaymentId: r.gatewayPaymentId,
@@ -617,6 +654,16 @@ export async function adminWalletStats() {
 // the topping-up user. Pulled to a constant so we can tweak it without
 // hunting through code.
 const REFERRAL_RATE = 0.1;
+
+// Platform margin on earnings withdrawals. Creator's `earningsBalance`
+// is already net of the call-time platform cut, so this is an
+// additional withdrawal-side fee on top. Doesn't apply to referral
+// wallet withdrawals (full payout, no fee). Tweak by changing this
+// single constant.
+// Exported so other services (e.g. call.handlers.js) can compute the
+// post-fee net earnings — referral payouts are sized off NET, not gross.
+export const WITHDRAW_FEE_RATE_EARNINGS = 0.2;
+const WITHDRAW_FEE_RATE_REFERRAL = 0;
 
 /**
  * Approve a top-up request: credits the user's wallet by the request
@@ -858,13 +905,15 @@ export async function listMyReferralPayouts(
 ) {
   const lim = Math.min(Math.max(Number(limit) || 30, 1), 100);
   const isSent = direction === 'sent';
-  // 'received' shows everything the user got (topup payouts + their
-  // own signup bonus). 'sent' is "money I caused to flow", which only
-  // makes sense for topup payouts — signup-bonus rows pair the new
-  // user with their referrer, but the new user didn't really "send"
-  // that bonus to anyone, so we filter them out of the sent view.
+  // 'received' shows everything the user got (topup + creator-earn
+  // payouts + their own signup bonus). 'sent' is "money I caused to
+  // flow" — topup payouts (the user recharged and triggered a 10% to
+  // their referrer) plus creator-earn (the user is a referred creator
+  // whose calls have been generating bonus payouts to their referrer).
+  // Signup-bonus rows pair the new user with their referrer but they
+  // didn't really "send" that bonus, so they're excluded from sent.
   const filter = isSent
-    ? { referredUserId: userId, kind: 'topup' }
+    ? { referredUserId: userId, kind: { $in: ['topup', 'creator-earn'] } }
     : { userId };
   if (cursor) {
     try {
@@ -910,9 +959,11 @@ export async function listMyReferralPayouts(
         // Field name reflects the direction so the frontend can render
         // either side cleanly. Source top-up amount intentionally absent.
         peerUsername: peer?.username || null,
-        // 'topup' (10% from a referee's recharge) | 'signup'
-        // (one-time bonus the referee got at signup). Lets the
-        // frontend label the row appropriately.
+        // 'topup'        — 10% from a referee's recharge
+        // 'signup'       — one-time bonus the referee got at signup
+        // 'creator-earn' — 10% of a referred creator's call earnings
+        //                  (per-call aggregate, in-window only)
+        // Lets the frontend label the row appropriately.
         kind: r.kind || 'topup',
         createdAt: r.createdAt,
       };

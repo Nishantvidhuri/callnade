@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { fmtCredits } from '../utils/formatCredits.js';
 import { api } from '../services/api.js';
+import ConsentDocument from './ConsentDocument.jsx';
 
 /**
  * Admin-only inline panel rendered on a user's public profile when the
@@ -216,34 +217,38 @@ export default function AdminProfileInsert({ userId }) {
               </Cell>
             </div>
 
-            {data.consent.hasPdf ? (
-              pdfUrl ? (
-                <div className="border-t border-neutral-200">
-                  <iframe
-                    src={pdfUrl}
-                    title="Consent PDF"
-                    className="w-full h-[55dvh] bg-white"
-                  />
-                  <div className="px-3 py-2 border-t border-neutral-200 flex items-center justify-end">
+            {/* Render the consent agreement directly in the page
+                instead of embedding the backend PDF in an iframe.
+                ConsentDocument mirrors the PDF's content using the
+                metadata already in `data.consent`, and the original
+                PDF is still downloadable below for archival. */}
+            <div className="border-t border-neutral-200">
+              <ConsentDocument
+                user={{
+                  _id: data._id || data.id,
+                  username: data.username,
+                  email: data.email,
+                }}
+                consent={data.consent}
+              />
+              {data.consent.hasPdf && (
+                <div className="px-3 py-2 border-t border-neutral-200 flex items-center justify-end">
+                  {pdfUrl ? (
                     <a
                       href={pdfUrl}
                       download={`consent-${data.username}.pdf`}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full bg-ink text-white hover:bg-neutral-800 transition"
                     >
-                      <Download size={12} /> Download PDF
+                      <Download size={12} /> Download archived PDF
                     </a>
-                  </div>
+                  ) : (
+                    <span className="text-[11px] text-neutral-400">
+                      Preparing PDF download…
+                    </span>
+                  )}
                 </div>
-              ) : (
-                <p className="px-4 py-5 text-center text-sm text-neutral-400 border-t border-neutral-200">
-                  Loading PDF…
-                </p>
-              )
-            ) : (
-              <p className="px-4 py-5 text-center text-sm text-neutral-500 border-t border-neutral-200">
-                No PDF on record (account predates PDF generation).
-              </p>
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>

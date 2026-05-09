@@ -420,15 +420,39 @@ function RequestCard({ r, isPayout, onApprove, onReject, onZoomQr }) {
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-[10px] uppercase tracking-wide text-neutral-500 font-bold">Requested</p>
-          <p className="text-xl font-bold tabular-nums text-ink">₹{fmtCredits(r.amount)}</p>
+          <p className="text-[10px] uppercase tracking-wide text-neutral-500 font-bold">
+            {r.type === 'withdraw' && r.feeRate > 0 ? 'Pay out' : 'Requested'}
+          </p>
+          {r.type === 'withdraw' && r.feeRate > 0 && r.netAmount != null ? (
+            <>
+              <p className="text-xl font-bold tabular-nums text-ink">
+                ₹{fmtCredits(r.netAmount)}
+              </p>
+              <p className="text-[10px] tabular-nums text-neutral-500 mt-0.5">
+                from ₹{fmtCredits(r.amount)}
+                <span className="text-neutral-400"> · </span>
+                <span className="text-amber-700">−{Math.round(r.feeRate * 100)}%</span>
+              </p>
+            </>
+          ) : (
+            <p className="text-xl font-bold tabular-nums text-ink">
+              ₹{fmtCredits(r.amount)}
+            </p>
+          )}
         </div>
       </div>
 
       {/* Three-column metric strip: wallet / requested / screenshot. */}
       <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-neutral-50 border border-neutral-100 p-2.5 text-center">
         <Metric label="Wallet now" value={`${fmtCredits(balance)}`} />
-        <Metric label="Requested" value={`₹${fmtCredits(r.amount)}`} />
+        <Metric
+          label={r.type === 'withdraw' && r.feeRate > 0 ? 'Pay out' : 'Requested'}
+          value={`₹${fmtCredits(
+            r.type === 'withdraw' && r.feeRate > 0 && r.netAmount != null
+              ? r.netAmount
+              : r.amount,
+          )}`}
+        />
         <div>
           <p className="text-[10px] uppercase tracking-wide text-neutral-500 font-bold">Screenshot</p>
           {r.hasQr ? (
@@ -546,9 +570,25 @@ function Row({ r, isPayout, onApprove, onReject, onZoomQr }) {
         </span>
       </Td>
       <Td align="right">
-        <span className="font-bold tabular-nums text-ink">
-          ₹{fmtCredits(r.amount)}
-        </span>
+        {/* Withdrawals with a fee — headline the NET (what admin
+            actually sends via UPI) so it's the eye-catcher. Gross +
+            fee sit on the line below for context. */}
+        {r.type === 'withdraw' && r.feeRate > 0 && r.netAmount != null ? (
+          <>
+            <span className="font-bold tabular-nums text-ink">
+              ₹{fmtCredits(r.netAmount)}
+            </span>
+            <p className="text-[10px] tabular-nums text-neutral-500 mt-0.5 leading-tight">
+              from ₹{fmtCredits(r.amount)}
+              <span className="text-neutral-400"> · </span>
+              <span className="text-amber-700">−{Math.round(r.feeRate * 100)}%</span>
+            </p>
+          </>
+        ) : (
+          <span className="font-bold tabular-nums text-ink">
+            ₹{fmtCredits(r.amount)}
+          </span>
+        )}
       </Td>
       <Td align="center">
         {r.hasQr ? (
@@ -735,7 +775,9 @@ function ConfirmActionModal({ request, isPayout, action, onClose, onActioned }) 
 
   const sideEffect = isApprove
     ? isPayout
-      ? `Subtract ${fmtCredits(request.amount)} credits from @${request.user?.username || 'user'}'s earnings.`
+      ? request.feeRate > 0 && request.netAmount != null
+        ? `Pay ₹${fmtCredits(request.netAmount)} to @${request.user?.username || 'user'} via UPI, then subtract ₹${fmtCredits(request.amount)} from their balance (${Math.round(request.feeRate * 100)}% platform fee).`
+        : `Subtract ${fmtCredits(request.amount)} credits from @${request.user?.username || 'user'}'s earnings.`
       : `Add ${fmtCredits(request.amount)} credits to @${request.user?.username || 'user'}'s wallet.`
     : `Mark this request as rejected. No balance changes.`;
 
@@ -781,6 +823,20 @@ function ConfirmActionModal({ request, isPayout, action, onClose, onActioned }) 
             <p className="text-2xl font-bold tabular-nums text-ink mt-0.5">
               ₹{fmtCredits(request.amount)}
             </p>
+            {/* Withdrawal fee breakdown — gives admin the exact UPI
+                payout amount they need to send before approving. */}
+            {isPayout && request.feeRate > 0 && request.netAmount != null && (
+              <div className="mt-2 pt-2 border-t border-neutral-200 text-[11px] space-y-0.5">
+                <div className="flex justify-between text-neutral-600">
+                  <span>Platform fee ({Math.round(request.feeRate * 100)}%)</span>
+                  <span className="tabular-nums">−₹{fmtCredits(request.amount - request.netAmount)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-amber-800">
+                  <span>Send via UPI</span>
+                  <span className="tabular-nums">₹{fmtCredits(request.netAmount)}</span>
+                </div>
+              </div>
+            )}
             {!isPayout && request.referenceId && (
               <p className="text-[11px] mt-1.5">
                 <span className="font-bold text-neutral-500 uppercase tracking-wide mr-1">UTR:</span>

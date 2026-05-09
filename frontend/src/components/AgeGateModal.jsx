@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check } from 'lucide-react';
+import { Check, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../stores/auth.store.js';
 import { forceLogVisit } from '../services/visit.js';
 
@@ -38,58 +38,70 @@ export default function AgeGateModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center p-4 bg-black/60 backdrop-blur-md">
-      <div className="w-full max-w-md rounded-3xl bg-neutral-950 text-white shadow-2xl flex flex-col max-h-[90dvh] overflow-hidden animate-[pop_150ms_ease-out]">
-        {/* Header — title + emoji row */}
-        <div className="px-6 pt-6 pb-2 text-center shrink-0">
-          <h2 className="text-xl font-bold tracking-tight">Important!!</h2>
-          <div className="mt-3 text-2xl tracking-wide select-none" aria-hidden="true">
-            🤬 ⚠️ 🍌 ⚠️ 🍌 ⚠️ 🤬
-          </div>
+    <div className="fixed inset-0 z-[80] grid place-items-center p-4 bg-black/40 backdrop-blur-sm">
+      <div
+        className="w-full max-w-md rounded-3xl bg-white text-ink border border-neutral-200 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.45)] flex flex-col max-h-[92dvh] overflow-hidden animate-[pop_150ms_ease-out]"
+      >
+        {/* Header — pink wash + branded shield. Replaces the emoji
+            shock row with a single confident icon. */}
+        <div className="px-6 pt-6 pb-5 text-center shrink-0 bg-gradient-to-b from-brand-50 to-white border-b border-brand-100">
+          <span className="inline-flex w-12 h-12 rounded-full bg-tinder text-white items-center justify-center shadow-md shadow-tinder/30">
+            <ShieldAlert size={22} strokeWidth={2.2} />
+          </span>
+          <h2 className="mt-3 text-lg font-bold tracking-tight">
+            Adult content — age verification
+          </h2>
+          <p className="mt-1 text-[12px] text-neutral-500">
+            callnade is an 18+ platform. Please confirm before continuing.
+          </p>
         </div>
 
-        {/* Scrollable terms body */}
-        <div className="px-6 py-4 overflow-y-auto flex-1 text-sm leading-relaxed space-y-3">
-          <p className="font-semibold">Please read our rules carefully.</p>
-          <p className="text-rose-500 font-semibold uppercase">
-            WARNING: THIS SITE HAS A ZERO TOLERANCE POLICY FOR UNDERAGE
-            BROADCASTING! IF YOU ARE NOT LEGALLY AN ADULT, OR IF YOU
-            BROADCAST ANY TYPE OF PORN, EROTIC PHOTOS OR VIDEO CONTENT
-            INVOLVING NON-ADULTS, YOUR PERSONAL DATA WILL BE TRANSFERRED
-            TO THE RELEVANT AUTHORITIES FOR ENFORCEMENT UNDER
-            INTERNATIONAL LAWS AGAINST CHILD PORNOGRAPHY.
+        {/* Body */}
+        <div className="px-6 py-5 overflow-y-auto flex-1 space-y-4 text-[13px] leading-relaxed text-neutral-700">
+          {/* Zero-tolerance card — themed, not a wall of red caps. */}
+          <div className="rounded-2xl bg-rose-50 border border-rose-200 p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-rose-700 mb-1.5 inline-flex items-center gap-1.5">
+              <AlertTriangle size={12} strokeWidth={2.5} /> Zero-tolerance policy
+            </p>
+            <p className="text-[12.5px] text-rose-900/90 leading-snug">
+              callnade has a zero-tolerance policy for underage broadcasting. If
+              you are not legally an adult, or if any pornographic, erotic, or
+              sexual photo or video content involving a person under the age of
+              majority is broadcast, your account data will be transferred to
+              the relevant authorities under international laws against child
+              sexual abuse material (CSAM).
+            </p>
+          </div>
+
+          {/* Disclosure */}
+          <p>
+            By proceeding to use the platform — including turning on your
+            camera — you confirm and warrant that:
           </p>
-          <p className="text-white/85">
-            Confirm you're 18 years old or over and agree to the terms
-            below before signing in: By turning your camera on you
-            confirm that you are 18 years old or older, and that you
-            are an adult according to your country's laws (the &lsquo;age
-            of majority&rsquo;). You represent and warrant that you will
-            not allow persons under the age of majority to use the
-            callnade application, communicate through the callnade
-            application, or perform any other actions which can be
-            carried out through the callnade application. You represent
-            and warrant that anyone appearing on camera with you has
-            also reached the age of majority. You represent and warrant
-            that you will immediately report by email to{' '}
-            <a
-              href="mailto:info@callnade.site"
-              className="underline font-semibold"
-            >
-              info@callnade.site
-            </a>{' '}
-            any and all instances where an individual who has not
-            reached the age of majority is using the application, or
-            any individual is broadcasting photo or video content
-            involving persons under the age of majority. If the
-            callnade administrators have any reasonable grounds for
-            suspecting that you are under the age of majority, your
-            account will be blocked permanently.
+          <ul className="space-y-2 pl-5 list-disc marker:text-tinder">
+            <li>
+              You are at least 18 years old and an adult under the laws of your
+              country (the &ldquo;age of majority&rdquo;).
+            </li>
+            <li>
+              Anyone who appears on camera with you has also reached the age of
+              majority.
+            </li>
+            <li>
+              You will not allow anyone under the age of majority to use
+              callnade, communicate through it, or perform any action through
+              it.
+            </li>
+          </ul>
+          <p className="text-[12px] text-neutral-500">
+            callnade may permanently block any account where moderators have
+            reasonable grounds to suspect the user is under the age of
+            majority.
           </p>
         </div>
 
         {/* Footer — terms checkbox + CTA */}
-        <div className="px-6 py-4 border-t border-white/10 shrink-0 space-y-3">
+        <div className="px-6 py-4 border-t border-neutral-200 shrink-0 space-y-3 bg-neutral-50/60">
           <button
             type="button"
             onClick={() => setAgreed((v) => !v)}
@@ -97,39 +109,40 @@ export default function AgeGateModal() {
             aria-pressed={agreed}
           >
             <span
-              className={`w-7 h-7 rounded-full grid place-items-center shrink-0 transition ${
+              className={`mt-0.5 w-5 h-5 rounded-md grid place-items-center shrink-0 transition border-2 ${
                 agreed
-                  ? 'bg-emerald-500 text-white'
-                  : 'bg-white/10 text-white/40 border border-white/30'
+                  ? 'bg-tinder border-tinder text-white'
+                  : 'bg-white border-neutral-300 text-transparent group-hover:border-neutral-400'
               }`}
             >
-              {agreed && <Check size={16} strokeWidth={3.2} />}
+              <Check size={13} strokeWidth={3.2} />
             </span>
-            <span className="text-[13px] text-white/85 leading-snug">
-              I have read, understand and agree to{' '}
-              <Link to="/terms" className="underline font-semibold">
-                Terms and Conditions
+            <span className="text-[12.5px] text-neutral-700 leading-snug">
+              I have read, understood, and agree to the{' '}
+              <Link to="/terms" className="text-tinder font-semibold hover:underline">
+                Terms &amp; Conditions
               </Link>
-              {' & '}
-              <Link to="/privacy" className="underline font-semibold">
-                Cookies Policy and Privacy Policy
+              {' and the '}
+              <Link to="/privacy" className="text-tinder font-semibold hover:underline">
+                Privacy &amp; Cookies Policy
               </Link>
+              .
             </span>
           </button>
 
           <button
             onClick={accept}
             disabled={!agreed}
-            className="w-full px-4 py-3.5 text-base font-bold rounded-full text-white bg-tinder shadow-tinder hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            className="w-full px-4 py-3.5 text-sm font-bold rounded-full text-white bg-tinder shadow-md shadow-tinder/30 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
-            Got it! Enter
+            I&rsquo;m 18 or older — Continue
           </button>
 
           <button
             onClick={exit}
-            className="block mx-auto text-[11px] text-white/40 hover:text-white/70 underline transition"
+            className="block mx-auto text-[11px] font-medium text-neutral-500 hover:text-rose-600 underline-offset-2 hover:underline transition"
           >
-            I'm under 18 — take me out
+            I&rsquo;m under 18 — take me elsewhere
           </button>
         </div>
       </div>

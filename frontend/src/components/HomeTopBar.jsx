@@ -25,12 +25,18 @@ export default function HomeTopBar({ query, onQueryChange }) {
 
   return (
     <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-7">
-      {/* Mobile-only brand wordmark. Hidden on lg+ where the sidebar shows it. */}
+      {/* Mobile-only brand mark. Hidden on lg+ where the sidebar shows it. */}
       <Link
         to="/"
-        className="lg:hidden font-logo text-2xl leading-none text-tinder tracking-wide shrink-0 mr-auto"
+        aria-label="callnade home"
+        className="lg:hidden shrink-0 mr-auto inline-flex items-center"
       >
-        callnade
+        <img
+          src="/logo.png"
+          alt="callnade"
+          className="h-8 w-auto select-none"
+          draggable={false}
+        />
       </Link>
 
       <div className="hidden lg:block flex-1" />

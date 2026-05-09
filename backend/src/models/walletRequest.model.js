@@ -60,6 +60,11 @@ const walletRequestSchema = new mongoose.Schema(
       enum: ['earnings', 'referral'],
       default: 'earnings',
     },
+    // Fraction (0–1) the platform retains on this withdrawal. 0.2 for
+    // creator earnings (20% platform margin); 0 for referral-wallet
+    // withdrawals (those are already pure bonus credits). The amount
+    // field stays the GROSS debit; net = amount * (1 - feeRate).
+    feeRate: { type: Number, default: 0, min: 0, max: 1 },
 
     // Topup-only field. Manual top-ups require the user to paste the
     // UPI reference / transaction id from their bank app so the admin

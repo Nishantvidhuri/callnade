@@ -3,15 +3,85 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>callnade</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <title>Call Nade</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Gugi&display=swap"
       rel="stylesheet"
     />
+    <style>
+      /* Opening splash. Lives directly in index.html so it paints on
+         the very first frame — before the JS bundle parses, before
+         React mounts, before the app stylesheet loads. App.jsx hides
+         it after auth bootstraps. */
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        background: #ffffff;
+        transition: opacity 0.32s ease;
+      }
+      #splash img {
+        width: min(72vw, 380px);
+        height: auto;
+        user-select: none;
+        -webkit-user-drag: none;
+        /* Gentle breathing pulse so the splash doesn't feel frozen
+           while auth + bundle hydrate. ~1.6s cycle keeps it calm. */
+        animation: splash-pulse 1.6s ease-in-out infinite;
+        will-change: transform, opacity;
+      }
+      @keyframes splash-pulse {
+        0%, 100% { transform: scale(1);    opacity: 0.92; }
+        50%      { transform: scale(1.04); opacity: 1; }
+      }
+      .splash-progress {
+        width: min(56vw, 240px);
+        height: 3px;
+        /* Same hue as the bar at low alpha — keeps the track clearly
+           pink without competing with the moving pill. */
+        background: rgba(252, 68, 129, 0.14);
+        border-radius: 999px;
+        overflow: hidden;
+        position: relative;
+      }
+      .splash-progress::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 38%;
+        border-radius: 999px;
+        /* Logo pink (#FC4481) with a subtle lighter pink at the trailing
+           edge — keeps it monochrome (matches the logo) while still
+           giving the pill a tiny bit of dimensionality. */
+        background: linear-gradient(90deg, #fc4481 0%, #fc4481 60%, #ff7aa6 100%);
+        animation: splash-bar 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
+      @keyframes splash-bar {
+        0%   { transform: translateX(-110%); }
+        100% { transform: translateX(280%); }
+      }
+      #splash.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
   </head>
   <body>
+    <div id="splash">
+      <img src="/loader.svg" alt="callnade" />
+      <div class="splash-progress" role="progressbar" aria-label="Loading"></div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

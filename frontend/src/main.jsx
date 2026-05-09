@@ -10,3 +10,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </BrowserRouter>,
 );
+
+// Splash fade-out is owned by App.jsx — it knows when auth has
+// finished bootstrapping, so the splash stays up through the auth
+// hydration step instead of flashing the spinner-on-pink fallback.

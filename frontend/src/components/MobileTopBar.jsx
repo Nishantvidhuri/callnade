@@ -105,9 +105,14 @@ export default function MobileTopBar() {
             <Link
               to="/"
               aria-label="callnade home"
-              className="font-logo text-2xl leading-none text-tinder tracking-wide shrink-0 mr-auto"
+              className="shrink-0 mr-auto inline-flex items-center"
             >
-              callnade
+              <img
+                src="/logo.png"
+                alt="callnade"
+                className="h-8 w-auto select-none"
+                draggable={false}
+              />
             </Link>
 
             {/* Creator-only "Available" toggle. Self-hides for

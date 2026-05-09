@@ -18,10 +18,13 @@ export default function HomeSidebar({ me, onLogout }) {
   return (
     <aside className="hidden lg:flex flex-col w-[240px] shrink-0 bg-tinder text-white">
       <div className="px-5 pt-6 pb-4">
-        <Link to="/" className="block">
-          <span className="font-logo text-[2rem] leading-none text-white tracking-wide drop-shadow-[0_2px_8px_rgba(0,0,0,0.18)]">
-            callnade
-          </span>
+        <Link to="/" aria-label="callnade home" className="inline-flex items-center">
+          <img
+            src="/logowithname.svg"
+            alt="callnade"
+            className="h-10 w-auto select-none"
+            draggable={false}
+          />
         </Link>
       </div>
 

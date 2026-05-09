@@ -498,26 +498,33 @@ export default function Signup() {
             />
           </AuthField>
 
-          {/* Referral input is regular-user only. Creators don't get
-              referred (no commercial reason to incentivise that). */}
-          {!asCreator && (
-            <AuthField label="Referral code">
-              <input
-                type="text"
-                placeholder="ABCD2345"
-                autoComplete="off"
-                autoCapitalize="characters"
-                autoCorrect="off"
-                spellCheck={false}
-                maxLength={12}
-                value={form.referralCode}
-                onChange={(e) =>
-                  set('referralCode', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
-                }
-                className={`${inputCls} font-mono tracking-wider`}
-              />
-            </AuthField>
-          )}
+          {/* Referral code — available to both regular users and
+              creators. For creators, the referrer earns a percentage
+              of the creator's per-call income for the first 30 days
+              (handled server-side; see call.handlers.js). */}
+          <AuthField
+            label="Referral code"
+            hint={
+              asCreator
+                ? 'Optional. If a friend referred you, paste their code here.'
+                : 'Optional. Earned by the friend who shared their code with you.'
+            }
+          >
+            <input
+              type="text"
+              placeholder="ABCD2345"
+              autoComplete="off"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              maxLength={12}
+              value={form.referralCode}
+              onChange={(e) =>
+                set('referralCode', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+              }
+              className={`${inputCls} font-mono tracking-wider`}
+            />
+          </AuthField>
         </Section>
 
         {asCreator && (

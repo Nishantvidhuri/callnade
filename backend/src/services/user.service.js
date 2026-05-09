@@ -9,6 +9,7 @@ import { avatarThumb } from '../utils/signedUrl.js';
 import { subscriberPrice } from '../utils/pricing.js';
 import { presentMedia } from './media.service.js';
 import { mintReferralCode } from './auth.service.js';
+import { getStatusMap } from '../realtime/handlers/presence.handlers.js';
 
 const PROFILE_CACHE_TTL = 60;
 const profileKey = (username) => `profile:${username}`;
@@ -150,16 +151,20 @@ export async function getPublicProfile(username, viewerId) {
   const canMessage = !isOwner;
   const canViewLocked = isOwner || isFollower;
 
-  const [avatar, galleryDocs, packages] = await Promise.all([
+  const [avatar, galleryDocs, packages, presenceMap] = await Promise.all([
     loadAvatar(user.avatarMediaId),
     Media.find({ userId: user._id, type: 'gallery' }).sort({ position: 1 }).lean(),
     user.role === 'provider'
       ? Package.find({ providerId: user._id, active: true }).sort({ createdAt: -1 }).lean()
       : Promise.resolve([]),
+    // Presence is intentionally fetched outside the profile cache —
+    // the cache is 60s but the dot needs to flip in real time.
+    getStatusMap([user._id]),
   ]);
+  const presence = presenceMap.get(String(user._id)) || 'offline';
 
   return {
-    user,
+    user: { ...user, presence },
     avatar,
     gallery: galleryDocs.map((m) => presentMedia(m, { canViewLocked })),
     packages: packages.map((p) => ({
@@ -255,8 +260,14 @@ export async function listMutuals(userId, { limit = 50 } = {}) {
     .select('_id username displayName avatarMediaId')
     .lean();
   const cards = await formatUserCards(users);
-  const onlineIds = await getOnlineSet(cards.map((c) => c.id));
-  return { items: cards.map((c) => ({ ...c, online: onlineIds.has(String(c.id)) })) };
+  // formatUserCards already attaches presence; legacy `online` flag
+  // mirrors "any active socket" (online or busy) for older clients.
+  return {
+    items: cards.map((c) => ({
+      ...c,
+      online: c.presence === 'online' || c.presence === 'busy',
+    })),
+  };
 }
 
 async function getAllOnlineIds() {
@@ -282,10 +293,12 @@ export async function listOnline({ limit = 24, excludeUserId, adult = false } = 
     role: 'provider',
     banned: { $ne: true },
     deletedAt: null,
-    // Creator-controlled "available" toggle. We treat missing as
-    // `true` for legacy rows that pre-date the field — they default
-    // to active, matching the new schema default.
-    isActive: { $ne: false },
+    // The `isActive` toggle is intentionally NOT applied here. If a
+    // creator's socket is connected we want them in the Online tab —
+    // otherwise we end up with cards that say LIVE on the popular
+    // feed (which derives status from Redis presence) but vanish on
+    // the Online tab, which looks like a bug to viewers. A creator
+    // who wants to fully hide should disconnect.
     // Match legacy creators (no isAdult field) into the normal bucket.
     isAdult: adult ? true : { $ne: true },
   })
@@ -293,6 +306,9 @@ export async function listOnline({ limit = 24, excludeUserId, adult = false } = 
     .select('_id username displayName followerCount avatarMediaId earningsBalance')
     .lean();
   const cards = await formatUserCards(users);
+  // Everyone here already passed the `presence:*` scan, so the legacy
+  // `online` flag is unconditionally true. Presence (online vs busy)
+  // is taken from formatUserCards.
   return { items: cards.map((c) => ({ ...c, online: true })) };
 }
 
@@ -310,20 +326,33 @@ async function getOnlineSet(ids) {
 async function formatUserCards(users) {
   if (!users.length) return [];
   const avatarIds = users.map((u) => u.avatarMediaId).filter(Boolean);
-  const avatars = avatarIds.length
-    ? await Media.find({ _id: { $in: avatarIds } }).select('_id variants').lean()
-    : [];
+  // Run avatar + presence lookups in parallel — both are independent
+  // O(N) reads against different stores.
+  const [avatars, statusMap] = await Promise.all([
+    avatarIds.length
+      ? Media.find({ _id: { $in: avatarIds } }).select('_id variants').lean()
+      : [],
+    getStatusMap(users.map((u) => u._id)),
+  ]);
   const avatarMap = new Map(avatars.map((a) => [String(a._id), a]));
-  return users.map((u) => ({
-    id: u._id,
-    username: u.username,
-    displayName: u.displayName,
-    followerCount: u.followerCount || 0,
-    earningsBalance: u.earningsBalance || 0,
-    avatarUrl: u.avatarMediaId
-      ? avatarThumb(avatarMap.get(String(u.avatarMediaId)))
-      : null,
-  }));
+  return users.map((u) => {
+    const presence = statusMap.get(String(u._id)) || 'offline';
+    return {
+      id: u._id,
+      username: u.username,
+      displayName: u.displayName,
+      followerCount: u.followerCount || 0,
+      earningsBalance: u.earningsBalance || 0,
+      avatarUrl: u.avatarMediaId
+        ? avatarThumb(avatarMap.get(String(u.avatarMediaId)))
+        : null,
+      // Tri-state for the new presence dot. The legacy `online`
+      // boolean (set by callers that explicitly mix it in) stays
+      // truthy for both online and busy so older UIs don't suddenly
+      // hide every card with someone in a call.
+      presence,
+    };
+  });
 }
 
 async function loadAvatar(mediaId) {

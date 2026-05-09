@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
+import { usePresenceStore } from '../stores/presence.store.js';
 import { uploadAvatar, uploadGalleryImage } from '../services/mediaUpload.js';
 import { enterFullscreenOnMobile } from '../utils/fullscreen.js';
 import Gallery from '../components/Gallery.jsx';
@@ -44,6 +45,14 @@ export default function Profile() {
   const isMe = profile && me && profile.user.username === me.username;
   const rel = profile?.relationship || {};
 
+  // Live presence dot — read from the store with the API payload as a
+  // fallback for the first paint. Drives the sticky-bottom CTA's
+  // disabled state when the creator goes into a call.
+  const livePresence = usePresenceStore((s) =>
+    profile?.user?._id ? s.byId[String(profile.user._id)] : null,
+  );
+  const presence = livePresence || profile?.user?.presence || 'offline';
+
   const load = async () => {
     if (!targetUsername) return;
     try {
@@ -70,6 +79,15 @@ export default function Profile() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetUsername]);
+
+  // Seed the presence store from the profile payload so the dot /
+  // sticky-CTA reflects the right state on first paint, before any
+  // socket presence:update arrives.
+  useEffect(() => {
+    if (profile?.user?._id && profile.user.presence) {
+      usePresenceStore.getState().seed(profile.user._id, profile.user.presence);
+    }
+  }, [profile?.user?._id, profile?.user?.presence]);
 
   const saveSettings = async (e) => {
     e?.preventDefault?.();
@@ -204,8 +222,17 @@ export default function Profile() {
 
   const u = profile.user;
 
+  // When a regular user is viewing a creator, hop the gallery up so it
+  // appears immediately after the Subscribe / call action row (and
+  // before packages), matching a dating-app reading order: identity →
+  // subscribe → photos → booking options. On own / non-creator views
+  // the gallery stays in its original spot near the bottom.
+  const isCreatorProfile = profile.user.role === 'provider';
+  const showInlineGallery = !isMe && isCreatorProfile;
+  const showStickyCallCTA = !isMe && isCreatorProfile && me?.role !== 'provider';
+
   return (
-    <Shell>
+    <Shell stickyOffset={showStickyCallCTA}>
       <button
         onClick={() => nav(-1)}
         aria-label="Back"
@@ -332,6 +359,16 @@ export default function Profile() {
         )}
       </div>
 
+      {/* Inline gallery — sits right after the action row on creator
+          profiles so the viewer sees: identity → subscribe → photos
+          → packages, in that order. Skipped on own/non-creator views
+          (the bottom Gallery render handles those). */}
+      {showInlineGallery && (
+        <div className="mb-8">
+          <Gallery items={profile.gallery} onSlotClick={onSlotClick} isOwner={isMe} />
+        </div>
+      )}
+
       {/* Referral card — owner-only. Shows the user's own random
           referral code, count of people they've referred, and lifetime
           earnings. If the user was themselves referred by someone,
@@ -444,82 +481,9 @@ export default function Profile() {
         <AdminProfileInsert userId={profile.user._id} />
       )}
 
-      {!!profile.packages?.length && (
-        <section className="mb-8">
-          <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
-            <span>Packages</span>
-            {u.role === 'provider' && (
-              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                Provider
-              </span>
-            )}
-          </h2>
-          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {profile.packages.map((p) => {
-              const canStartCall = me?.role !== 'provider';
-              // No subscription gate — anyone can book a package call.
-              const callable = !isMe && p.durationMinutes > 0 && canStartCall;
-              const perMin = p.durationMinutes ? (p.price / p.durationMinutes) : null;
-              return (
-                <li
-                  key={p.id}
-                  className="rounded-2xl bg-white border border-neutral-200 p-4 flex flex-col"
-                >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-semibold text-sm">{p.title}</p>
-                    <span
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-full ${
-                        p.callType === 'audio'
-                          ? 'bg-sky-100 text-sky-700'
-                          : 'bg-brand-100 text-brand-600'
-                      }`}
-                    >
-                      {p.callType === 'audio' ? <Phone size={9} /> : <Video size={9} />}
-                      {p.callType === 'audio' ? 'Audio' : 'Video'}
-                    </span>
-                  </div>
-                  {p.description && <p className="text-xs text-neutral-500 mt-1 line-clamp-3">{p.description}</p>}
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-base font-bold text-emerald-600 tabular-nums">
-                      {p.price} <span className="text-xs text-neutral-500 font-medium">credits</span>
-                    </span>
-                    {p.durationMinutes != null && (
-                      <span className="text-xs text-neutral-500">{p.durationMinutes} min</span>
-                    )}
-                  </div>
-                  {perMin != null && (
-                    <p className="text-[11px] text-neutral-400 mt-1">≈ {perMin.toFixed(1)} credits/min</p>
-                  )}
-                  {callable && (
-                    <button
-                      onClick={() => {
-                        const balance = me?.walletBalance ?? 0;
-                        if (balance < p.price) {
-                          setRecharge({ required: p.price, balance });
-                          return;
-                        }
-                        enterFullscreenOnMobile();
-                        const qs = new URLSearchParams({
-                          package: p.id,
-                          type: p.callType === 'audio' ? 'audio' : 'video',
-                          peer: profile.user.username,
-                        });
-                        nav(`/call/${profile.user._id}?${qs.toString()}`);
-                      }}
-                      className="mt-3 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full text-white bg-tinder shadow-tinder/30 hover:brightness-110 transition"
-                    >
-                      {p.callType === 'audio' ? <Phone size={13} /> : <Video size={13} />}
-                      Start call
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+      {!showInlineGallery && (
+        <Gallery items={profile.gallery} onSlotClick={onSlotClick} isOwner={isMe} />
       )}
-
-      <Gallery items={profile.gallery} onSlotClick={onSlotClick} isOwner={isMe} />
 
       {!isMe && !rel.canViewLocked && (
         <p className="mt-6 text-xs text-neutral-500 text-center">
@@ -553,11 +517,67 @@ export default function Profile() {
         onClose={() => setPickerCallType(null)}
         onStart={(packageId, packageCallType) => startWithPackage(packageId, packageCallType)}
       />
+
+      {/* Sticky bottom call CTA — two pills (Audio + Video) so the
+          viewer can pick the call type. Each opens the package picker
+          filtered to that call type, and the picker drives the
+          actual /call/{id} navigation. Sits above HomeBottomBar on
+          mobile (the bottom nav is `lg:hidden fixed bottom-0`, so we
+          offset by its height there) and at the viewport bottom on
+          lg+. Both buttons dim and go no-op when the creator is
+          currently in a call. */}
+      {showStickyCallCTA && (
+        <div className="fixed inset-x-0 bottom-16 lg:bottom-0 z-30 pointer-events-none">
+          {/* Two free-floating pills on the page's pink wash — no
+              white card behind them. Both buttons share the brand
+              palette: outline pink for audio, solid pink for video,
+              so the bar reads as one harmonious pair instead of
+              clashing colours. */}
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 pb-3 lg:pb-4 pointer-events-auto flex gap-2.5">
+            <button
+              type="button"
+              onClick={() => presence !== 'busy' && startCall('audio')}
+              disabled={presence === 'busy'}
+              aria-label={
+                presence === 'busy'
+                  ? `${u.displayName || u.username} is currently in a call`
+                  : `Audio call ${u.displayName || u.username}`
+              }
+              className={`flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full text-sm font-semibold transition shadow-md ${
+                presence === 'busy'
+                  ? 'bg-neutral-200 text-neutral-500 cursor-not-allowed'
+                  : 'bg-brand-200 text-brand-700 hover:bg-brand-100 active:translate-y-[1px]'
+              }`}
+            >
+              <Phone size={16} strokeWidth={2.2} />
+              {presence === 'busy' ? 'In a call' : 'Audio'}
+            </button>
+            <button
+              type="button"
+              onClick={() => presence !== 'busy' && startCall('video')}
+              disabled={presence === 'busy'}
+              aria-label={
+                presence === 'busy'
+                  ? `${u.displayName || u.username} is currently in a call`
+                  : `Video call ${u.displayName || u.username}`
+              }
+              className={`flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full text-sm font-semibold transition shadow-md shadow-tinder/30 ${
+                presence === 'busy'
+                  ? 'bg-neutral-300 text-white cursor-not-allowed'
+                  : 'bg-tinder text-white hover:brightness-110 active:translate-y-[1px]'
+              }`}
+            >
+              <Video size={17} strokeWidth={2.2} />
+              {presence === 'busy' ? 'In a call' : 'Video'}
+            </button>
+          </div>
+        </div>
+      )}
     </Shell>
   );
 }
 
-function Shell({ children }) {
+function Shell({ children, stickyOffset = false }) {
   const me = useAuthStore((s) => s.user);
   const nav = useNavigate();
   const onLogout = async () => {
@@ -572,7 +592,15 @@ function Shell({ children }) {
       <main className="flex-1 flex flex-col min-h-0 bg-[#fff5f9]">
         <MobileTopBar />
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24 lg:pb-8">{children}</div>
+          {/* Extra bottom padding when the sticky call CTA is on so
+              the last bits of content don't sit underneath it. */}
+          <div
+            className={`max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-8 ${
+              stickyOffset ? 'pb-44 lg:pb-28' : 'pb-24 lg:pb-8'
+            }`}
+          >
+            {children}
+          </div>
         </div>
       </main>
       <HomeBottomBar />
@@ -838,13 +866,23 @@ function ReferralCard({ code, referralCount, referralEarnings, referralWalletBal
 function PayoutRow({ p, sign, tone }) {
   const cls =
     tone === 'amber' ? 'text-amber-700' : 'text-emerald-700';
-  // Signup bonus rows tell a different story than the regular 10%
-  // top-up payouts — label them so the user can see which is which.
+  // Three flavours of payout share this row:
+  //   signup       — one-time bonus the referee got at their signup
+  //   topup        — 10% to the referrer when their referee recharged
+  //   creator-earn — 10% to the referrer from a referred creator's
+  //                  call earnings (only inside the 30-day window)
+  // Each gets a distinct title + badge so the user can see at a
+  // glance where the credits came from.
   const isSignup = p.kind === 'signup';
+  const isCreatorEarn = p.kind === 'creator-earn';
   const titleText = isSignup
     ? p.peerUsername
       ? `Signup bonus · @${p.peerUsername}`
       : 'Signup bonus'
+    : isCreatorEarn
+    ? p.peerUsername
+      ? `Creator call · @${p.peerUsername}`
+      : 'Creator call'
     : p.peerUsername
     ? `@${p.peerUsername}`
     : 'Referral';
@@ -856,6 +894,11 @@ function PayoutRow({ p, sign, tone }) {
           {isSignup && (
             <span className="inline-block mr-1.5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide rounded bg-emerald-100 text-emerald-700 align-middle">
               from referral
+            </span>
+          )}
+          {isCreatorEarn && (
+            <span className="inline-block mr-1.5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide rounded bg-fuchsia-100 text-fuchsia-700 align-middle">
+              creator 10%
             </span>
           )}
           {fmtPayoutDate(p.createdAt)}

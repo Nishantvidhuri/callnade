@@ -1142,11 +1142,20 @@ function WithdrawForm({ balance, source = 'earnings', onClose, onSuccess }) {
     );
   }
 
+  // Platform fee on creator earnings (20%). Referral wallet
+  // withdrawals are full payout — keep the constant aligned with the
+  // backend's WITHDRAW_FEE_RATE_* values.
+  const feeRate = source === 'referral' ? 0 : 0.2;
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const grossNum = Math.max(0, num);
+  const fee = r2(grossNum * feeRate);
+  const netPayout = r2(grossNum - fee);
+
   return (
     <form onSubmit={submit} className="space-y-3">
       <div className="rounded-2xl bg-neutral-50 border border-neutral-200 p-3.5">
         <p className="text-[11px] uppercase tracking-wide font-bold text-neutral-500">
-          Earnings balance
+          {source === 'referral' ? 'Referral wallet' : 'Earnings balance'}
         </p>
         <p className="text-2xl font-bold tabular-nums text-ink mt-0.5">
           {fmtCredits(balance)}{' '}
@@ -1156,7 +1165,7 @@ function WithdrawForm({ balance, source = 'earnings', onClose, onSuccess }) {
 
       <label className="flex flex-col gap-1.5">
         <span className="flex items-center justify-between text-xs font-bold uppercase tracking-wide text-neutral-700">
-          Amount (credits)
+          Amount to withdraw
           <button
             type="button"
             onClick={() => setAmount(String(balance))}
@@ -1177,10 +1186,34 @@ function WithdrawForm({ balance, source = 'earnings', onClose, onSuccess }) {
         />
         {num > 0 && num > balance && (
           <span className="text-[11px] text-rose-600">
-            Amount exceeds earnings balance.
+            Amount exceeds {source === 'referral' ? 'referral wallet' : 'earnings'} balance.
           </span>
         )}
       </label>
+
+      {/* Fee breakdown — only for earnings withdrawals (referral
+          wallet has no fee). Surfaces what the user actually receives
+          so there's no surprise on payout. */}
+      {feeRate > 0 && grossNum > 0 && grossNum <= balance && (
+        <div className="rounded-2xl bg-amber-50 border border-amber-200 p-3 text-xs space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-amber-800">Withdrawing</span>
+            <span className="font-bold tabular-nums text-amber-900">
+              ₹{fmtCredits(grossNum)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-amber-700">
+            <span>Platform fee ({Math.round(feeRate * 100)}%)</span>
+            <span className="font-semibold tabular-nums">−₹{fmtCredits(fee)}</span>
+          </div>
+          <div className="flex items-center justify-between pt-1.5 border-t border-amber-200">
+            <span className="font-bold text-amber-900">You'll receive</span>
+            <span className="text-base font-bold tabular-nums text-amber-900">
+              ₹{fmtCredits(netPayout)}
+            </span>
+          </div>
+        </div>
+      )}
 
       <label className="flex flex-col gap-1.5">
         <span className="text-xs font-bold uppercase tracking-wide text-neutral-700">

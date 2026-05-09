@@ -37,13 +37,18 @@ const referralPayoutSchema = new mongoose.Schema(
       index: true,
     },
     amount: { type: Number, required: true, min: 0 },
-    // 'topup'  — 10% to the referrer when their referee tops up
-    //            (userId = referrer, referredUserId = the topper).
-    // 'signup' — one-time bonus to the referee at signup
-    //            (userId = referee,  referredUserId = the referrer).
+    // 'topup'        — 10% to the referrer when their referee tops up
+    //                  (userId = referrer, referredUserId = the topper).
+    // 'signup'       — one-time bonus to the referee at signup
+    //                  (userId = referee,  referredUserId = the referrer).
+    // 'creator-earn' — 10% of a referred CREATOR's call earnings, paid
+    //                  to the referrer for 30 days from the creator's
+    //                  signup. One row per finished call (not per
+    //                  flush) — `amount` is the total accrued for the
+    //                  call, no walletRequestId.
     kind: {
       type: String,
-      enum: ['topup', 'signup'],
+      enum: ['topup', 'signup', 'creator-earn'],
       default: 'topup',
       index: true,
     },

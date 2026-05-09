@@ -1,11 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Check, ArrowLeft, ShieldCheck, Lock, FileText } from 'lucide-react';
+import CreatorTermsContent from './CreatorTermsContent.jsx';
 
-const REQUIRED_DECLARATIONS = [
+const USER_DECLARATIONS = [
   'I confirm that I am at least 18 years old.',
   'I understand that I am solely responsible for my interactions and conduct on the platform.',
   'I agree to comply with all platform rules and applicable laws.',
   'I consent to the platform’s privacy, moderation, and safety policies.',
+];
+
+// Creator path tightens the declarations — they're acknowledging
+// independent-contractor status, tax responsibility, payout-clawback
+// risk, and the no-off-platform rule. Each item maps to a substantive
+// clause in the creator T&C body so a creator can't claim they only
+// agreed to "general terms".
+const CREATOR_DECLARATIONS = [
+  'I confirm that I am at least 18 years old and the identity documents I have submitted (or will submit) are genuine and mine.',
+  'I understand that I operate as an independent creator — not an employee or partner of CallNade — and I am solely responsible for my own taxes, equipment, and conduct.',
+  'I will not solicit users to communicate or pay outside the platform, and I will not share personal contact details (phone, WhatsApp, social handles) during interactions.',
+  'I understand that earnings may be withheld, debited, or forfeited in cases of fraud, chargebacks, KYC failure, or violation of these terms.',
+  'I consent to CallNade’s moderation, recording-for-safety, watermarking, and reporting policies, and I agree to comply with all platform rules and applicable Indian laws.',
 ];
 
 /**
@@ -29,7 +43,10 @@ export default function ConsentForm({
   error = null,
   isCreator = false,
 }) {
-  const [checks, setChecks] = useState(() => REQUIRED_DECLARATIONS.map(() => false));
+  // Pick the right declaration set up-front based on isCreator. Re-runs
+  // only on mount — switching path mid-form would reset the checks.
+  const declarations = isCreator ? CREATOR_DECLARATIONS : USER_DECLARATIONS;
+  const [checks, setChecks] = useState(() => declarations.map(() => false));
   const [fullName, setFullName] = useState(defaultName);
   const [signature, setSignature] = useState('');
   const [touched, setTouched] = useState(false);
@@ -82,11 +99,14 @@ export default function ConsentForm({
       <div className="rounded-2xl border border-neutral-200 bg-neutral-50 overflow-hidden">
         <div className="px-4 py-3 border-b border-neutral-200 bg-white flex items-center gap-2">
           <FileText size={14} className="text-neutral-500" />
-          <p className="text-sm font-semibold">User consent &amp; community guidelines</p>
+          <p className="text-sm font-semibold">
+            {isCreator ? 'CallNade creator terms & conditions' : 'User consent & community guidelines'}
+          </p>
           <span className="ml-auto text-[11px] text-neutral-400 tabular-nums">{today}</span>
         </div>
 
         <div className="max-h-[44vh] sm:max-h-[55vh] overflow-y-auto px-4 py-3.5 text-[13px] leading-relaxed text-neutral-700 space-y-4">
+          {isCreator ? <CreatorTermsContent /> : <>
           <p>
             By creating an account, uploading content, interacting with users, or using any feature of
             this platform — including messaging, profile sharing, image viewing, and video calling —
@@ -218,6 +238,7 @@ export default function ConsentForm({
           <Section n={12} title="Changes to Terms">
             <p>The platform may update these terms at any time. Continued use constitutes acceptance of revised terms.</p>
           </Section>
+          </>}
         </div>
       </div>
 
@@ -227,7 +248,7 @@ export default function ConsentForm({
           <Lock size={12} /> User declaration
         </p>
         <ul className="space-y-2.5">
-          {REQUIRED_DECLARATIONS.map((label, i) => (
+          {declarations.map((label, i) => (
             <li key={i} className="flex items-start gap-2.5">
               <button
                 type="button"

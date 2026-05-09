@@ -1,6 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import Logo from './Logo.jsx';
 
 const FALLBACK = {
   warm: 'https://i.pinimg.com/736x/03/7b/21/037b21d835e95ca3b9f29884b47752b2.jpg',
@@ -48,9 +47,17 @@ export default function AuthLayout({
           <Link
             to="/"
             aria-label="Home"
-            className="absolute top-6 left-1/2 -translate-x-1/2 inline-flex text-white drop-shadow-lg z-10"
+            className="absolute top-6 left-1/2 -translate-x-1/2 inline-flex z-10 drop-shadow-[0_4px_14px_rgba(0,0,0,0.35)]"
           >
-            <Logo size={48} />
+            {/* No white tile — drop-shadow on the wrapper keeps the
+                gradient mark legible against whatever background image
+                the auth panel happens to have. */}
+            <img
+              src="/logo.png"
+              alt="callnade"
+              className="h-10 w-auto select-none"
+              draggable={false}
+            />
           </Link>
         </aside>
 
@@ -73,13 +80,19 @@ export default function AuthLayout({
                 <ArrowLeft size={20} strokeWidth={1.8} />
               </button>
 
-              {/* Mobile-only brand wordmark — replaces the desktop image
+              {/* Mobile-only brand mark — replaces the desktop image
                   panel's logo and gives the page identity. */}
               <Link
                 to="/"
-                className="md:hidden font-logo text-2xl leading-none text-tinder tracking-wide pr-1"
+                aria-label="callnade home"
+                className="md:hidden inline-flex items-center pr-1"
               >
-                callnade
+                <img
+                  src="/logo.png"
+                  alt="callnade"
+                  className="h-8 w-auto select-none"
+                  draggable={false}
+                />
               </Link>
             </div>
 
