@@ -10,7 +10,7 @@ import * as wallet from '../controllers/wallet.controller.js';
 export const router = Router();
 
 // Top-up accepts EITHER:
-//   - application/json body  { amount, referenceId, payerUpiId }
+//   - application/json body  { amount, referenceId }
 //   - image/{jpeg,png,webp}  body with fields in the query string,
 //     plus an image attached as raw bytes (payment screenshot).
 //

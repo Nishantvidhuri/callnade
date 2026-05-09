@@ -97,7 +97,7 @@ function razorpayClient() {
  */
 export async function createTopupRequest(
   userId,
-  { amount, referenceId, payerUpiId },
+  { amount, referenceId },
   screenshotBuffer = null,
   screenshotContentType = null,
 ) {
@@ -115,18 +115,6 @@ export async function createTopupRequest(
   }
   if (!/^[A-Za-z0-9_\-]+$/.test(ref)) {
     throw badRequest('Reference id must be letters, digits, dashes or underscores only');
-  }
-
-  // Payer UPI handle ("paying from") — optional. When supplied we
-  // normalise it the same way as withdrawal (name@bank, or a phone
-  // we auto-suffix via resolveVpa). When the field's missing or
-  // bogus, we just store null — admins reconcile via the UTR ref +
-  // optional payment screenshot.
-  let payerVpa = null;
-  if (payerUpiId) {
-    payerVpa = resolveVpa(payerUpiId);
-    // Don't reject the topup just because the optional field is
-    // malformed — drop it silently rather than blocking the user.
   }
 
   // Block obvious replay: same user submitting the same reference id
@@ -186,7 +174,6 @@ export async function createTopupRequest(
     amount: finalAmount,
     status: 'pending',
     referenceId: ref,
-    payerUpiId: payerVpa,
     qrUrl: screenshotUrl,
     qrContentType: screenshotUrl ? screenshotContentType : null,
     adminNote: firstPaymentNote,
@@ -195,7 +182,6 @@ export async function createTopupRequest(
     id: String(doc._id),
     status: doc.status,
     referenceId: ref,
-    payerUpiId: payerVpa,
     qrUrl: screenshotUrl,
     enteredAmount: amt,
     bonusApplied: isFirstTopup ? FIRST_TOPUP_BONUS : 0,

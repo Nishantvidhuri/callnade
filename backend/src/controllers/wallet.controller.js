@@ -3,7 +3,7 @@ import * as paymentQrService from '../services/paymentQr.service.js';
 
 /**
  * Top-up flow accepts EITHER:
- *   - JSON body { amount, referenceId, payerUpiId }
+ *   - JSON body { amount, referenceId }
  *   - Raw image bytes (jpeg/png/webp) with the same fields in the
  *     query string — same shape as /wallet/withdraw and /media/upload.
  *
@@ -19,12 +19,10 @@ export async function topup(req, res) {
     ? {
         amount: Number(req.query.amount),
         referenceId: req.query.referenceId,
-        payerUpiId: req.query.payerUpiId,
       }
     : {
         amount: req.body?.amount,
         referenceId: req.body?.referenceId,
-        payerUpiId: req.body?.payerUpiId,
       };
 
   res.json(
