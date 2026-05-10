@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { PhoneOff, Mic, MicOff, Video, VideoOff, Wallet } from 'lucide-react';
+import {
+  PhoneOff, Mic, MicOff, Video, VideoOff, Wallet, Maximize2, Minimize2,
+} from 'lucide-react';
 import { getSocket } from '../services/socket.js';
 import { fetchIceConfig, createPeer, getLocalStream, tuneSenders, openSpectatorPc } from '../services/webrtc.js';
 import { exitFullscreen } from '../utils/fullscreen.js';
@@ -330,6 +332,55 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
 
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(
+    typeof document !== 'undefined' && !!document.fullscreenElement,
+  );
+
+  // Track fullscreen state across native API + manual toggles. The
+  // browser fires `fullscreenchange` on the document for both
+  // user-initiated (Esc) and programmatic exits, so we just listen
+  // and mirror the state.
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const rootRef = useRef(null);
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await rootRef.current?.requestFullscreen?.();
+      }
+    } catch {
+      /* user denied or unsupported — fail quiet */
+    }
+  };
+
+  // Outgoing-ringtone — plays on the caller side while we're waiting
+  // for the callee to pick up. Stops the moment status flips off
+  // 'ringing' / 'starting' (connected, ended, rejected, error). The
+  // file ships from public/audio/call.mp3 so it's served at the
+  // build root with cache-friendly hashing.
+  const ringRef = useRef(null);
+  useEffect(() => {
+    if (!ringRef.current) return;
+    const isWaiting = status === 'ringing' || status === 'starting';
+    if (isWaiting) {
+      ringRef.current.loop = true;
+      ringRef.current.volume = 0.55;
+      // play() may reject on iOS until the user gestures — a short
+      // catch keeps it from blowing up the call setup.
+      ringRef.current.play().catch(() => {});
+    } else {
+      try {
+        ringRef.current.pause();
+        ringRef.current.currentTime = 0;
+      } catch {}
+    }
+  }, [status]);
 
   const toggleMute = () => {
     const track = localStreamRef?.current?.getAudioTracks()[0];
@@ -345,8 +396,40 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
     setCameraOff(!track.enabled);
   };
 
+  // Pre-connection: show the user's selfie (local preview) full-screen
+  // while waiting for the callee to pick up — there's no remote video
+  // yet, so making the page-spanning element be the local stream gives
+  // the caller something to look at and lets them check their hair /
+  // lighting before the other side joins.
+  const showLocalAsHero = !isAudio && status !== 'connected';
+
   return (
-    <div className="h-[100dvh] bg-neutral-950 text-white flex flex-col overflow-hidden relative">
+    <div
+      ref={rootRef}
+      className="h-[100dvh] bg-neutral-950 text-white flex flex-col overflow-hidden relative"
+    >
+      {/* Outgoing ringtone — invisible audio element. Loop is set
+          imperatively on play. */}
+      <audio ref={ringRef} src="/audio/call.mp3" preload="auto" className="hidden" />
+      {/* Fullscreen toggle — top-right, clear of the iPhone notch.
+          Native Fullscreen API; on iOS Safari this falls back to
+          element fullscreen which is what we want anyway. The track
+          for current state lives in the parent so the icon flips
+          correctly even when Esc fires the change. */}
+      <button
+        type="button"
+        onClick={toggleFullscreen}
+        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        className="absolute z-20 w-10 h-10 grid place-items-center rounded-full bg-black hover:bg-neutral-900 active:scale-95 transition shadow-lg"
+        style={{
+          top: 'max(env(safe-area-inset-top), 14px)',
+          right: 'max(env(safe-area-inset-right), 14px)',
+        }}
+      >
+        {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+      </button>
+
       {/* Status pill — centered top, clear of the iPhone notch. */}
       <div
         className="absolute z-10 left-1/2 -translate-x-1/2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur text-xs font-medium whitespace-nowrap"
@@ -416,35 +499,59 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
           </>
         ) : (
           <>
+            {/* Remote feed — always mounted so we can attach the track
+                as soon as it arrives. Hidden behind the local hero
+                while we're waiting; un-hides on connected. The local
+                preview is mirrored (scaleX(-1)) so users see
+                themselves the way they'd appear in a bathroom mirror,
+                which is what every other video-call app does. The
+                outgoing track is unaffected — the remote sees the
+                normal, un-mirrored feed. */}
             <video
               ref={remoteVideo}
               autoPlay
               playsInline
-              className="absolute inset-0 w-full h-full object-cover sm:object-contain bg-neutral-900"
+              className={`absolute inset-0 w-full h-full object-cover sm:object-contain bg-neutral-900 ${
+                showLocalAsHero ? 'opacity-0 pointer-events-none' : 'opacity-100'
+              }`}
             />
 
-            {/* Local-video PIP — smaller on phones, larger on tablets+. Sits
-                above the controls thanks to bottom-28/sm:bottom-32. */}
-            <div className="absolute right-3 sm:right-5 w-20 sm:w-32 lg:w-40 aspect-[3/4] rounded-2xl overflow-hidden border-2 border-white/40 shadow-xl bg-neutral-800"
-                 style={{ bottom: 'calc(max(env(safe-area-inset-bottom), 24px) + 96px)' }}>
+            {showLocalAsHero ? (
+              // Pre-connect hero — full-screen selfie while ringing.
               <video
                 ref={localVideo}
                 autoPlay
                 playsInline
                 muted
-                className={`w-full h-full object-cover transition ${cameraOff ? 'opacity-0' : 'opacity-100'}`}
+                className="absolute inset-0 w-full h-full object-cover bg-neutral-900"
+                style={{ transform: 'scaleX(-1)' }}
               />
-              {cameraOff && (
-                <div className="absolute inset-0 grid place-items-center text-white/70">
-                  <VideoOff size={18} />
-                </div>
-              )}
-              {muted && (
-                <div className="absolute top-1 left-1 w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-rose-600 grid place-items-center shadow">
-                  <MicOff size={10} strokeWidth={2.5} />
-                </div>
-              )}
-            </div>
+            ) : (
+              // Connected — local moves to a corner PIP.
+              <div
+                className="absolute right-3 sm:right-5 w-20 sm:w-32 lg:w-40 aspect-[3/4] rounded-2xl overflow-hidden border-2 border-white/40 shadow-xl bg-neutral-800"
+                style={{ bottom: 'calc(max(env(safe-area-inset-bottom), 24px) + 96px)' }}
+              >
+                <video
+                  ref={localVideo}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover transition ${cameraOff ? 'opacity-0' : 'opacity-100'}`}
+                  style={{ transform: 'scaleX(-1)' }}
+                />
+                {cameraOff && (
+                  <div className="absolute inset-0 grid place-items-center text-white/70">
+                    <VideoOff size={18} />
+                  </div>
+                )}
+                {muted && (
+                  <div className="absolute top-1 left-1 w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-rose-600 grid place-items-center shadow">
+                    <MicOff size={10} strokeWidth={2.5} />
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
