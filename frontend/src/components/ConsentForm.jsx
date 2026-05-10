@@ -48,7 +48,6 @@ export default function ConsentForm({
   const declarations = isCreator ? CREATOR_DECLARATIONS : USER_DECLARATIONS;
   const [checks, setChecks] = useState(() => declarations.map(() => false));
   const [fullName, setFullName] = useState(defaultName);
-  const [signature, setSignature] = useState('');
   const [touched, setTouched] = useState(false);
 
   const today = useMemo(() => {
@@ -58,16 +57,18 @@ export default function ConsentForm({
 
   const allChecked = checks.every(Boolean);
   const nameOk = fullName.trim().length >= 2;
-  const signatureOk = signature.trim().length >= 2;
-  const canSubmit = allChecked && nameOk && signatureOk && !submitting;
+  const canSubmit = allChecked && nameOk && !submitting;
 
   const submit = (e) => {
     e.preventDefault();
     setTouched(true);
     if (!canSubmit) return;
+    // Backend still expects a `signature` field on the consent
+    // record — we use the typed full name as a stand-in so the
+    // PDF / audit row stay populated without a separate input.
     onAccept?.({
       fullName: fullName.trim(),
-      signature: signature.trim(),
+      signature: fullName.trim(),
       acceptedAt: new Date().toISOString(),
     });
   };
@@ -291,27 +292,11 @@ export default function ConsentForm({
           </label>
         </div>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-neutral-700">Signature</span>
-          <input
-            type="text"
-            value={signature}
-            onChange={(e) => setSignature(e.target.value)}
-            placeholder="Type your name as your signature"
-            required
-            className="px-4 py-2.5 text-sm rounded-xl border border-neutral-300 italic focus:outline-none focus:border-ink focus:ring-2 focus:ring-black/10 transition"
-            style={{ fontFamily: 'cursive' }}
-          />
-        </label>
-
         {touched && !allChecked && (
           <p className="text-xs text-rose-600">Please confirm all declarations to continue.</p>
         )}
         {touched && allChecked && !nameOk && (
           <p className="text-xs text-rose-600">Please enter your full name.</p>
-        )}
-        {touched && allChecked && nameOk && !signatureOk && (
-          <p className="text-xs text-rose-600">Please type your signature to confirm.</p>
         )}
       </div>
 
