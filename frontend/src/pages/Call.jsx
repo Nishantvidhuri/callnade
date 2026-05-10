@@ -121,16 +121,34 @@ export default function Call() {
     window.addEventListener('pageshow', onVisibility);
     window.addEventListener('focus', onVisibility);
 
-    // Expose the recovery helper to the controls row. The button on
-    // CallShell calls this; we also relay the request to the remote
-    // so a frozen-on-their-side camera can be unstuck from either
-    // peer.
-    refreshRef.current = () => {
-      reacquireMedia();
-      if (callIdRef.current) {
+    // Full-restart: re-grab the camera AND tear/redo the ICE
+    // negotiation. ReplaceTrack alone doesn't fix a stuck peer
+    // connection (NAT bindings expired, network switched, ICE in a
+    // 'failed' state). `createOffer({ iceRestart: true })` forces a
+    // brand-new ICE gathering on both sides; the existing rtc:offer
+    // handler on the creator side picks it up and answers. The
+    // remote side also gets an `rtc:refresh` nudge so it reacquires
+    // its own camera in lockstep.
+    const fullRestart = async () => {
+      await reacquireMedia();
+      const pc = pcRef.current;
+      if (pc && callIdRef.current) {
+        try {
+          const offer = await pc.createOffer({ iceRestart: true });
+          await pc.setLocalDescription(offer);
+          socket.emit('rtc:offer', { callId: callIdRef.current, sdp: offer });
+        } catch {
+          /* peer connection may already be closed; nothing to do */
+        }
         socket.emit('rtc:refresh', { callId: callIdRef.current });
       }
     };
+
+    // Expose the helper to the controls row. The button on CallShell
+    // calls this; either peer can press it and the connection
+    // re-establishes from the caller side (only the offerer can
+    // initiate an ICE restart cleanly).
+    refreshRef.current = fullRestart;
 
     const cleanup = () => {
       pcRef.current?.close();
@@ -219,12 +237,14 @@ export default function Call() {
       try { await pcRef.current.addIceCandidate(candidate); } catch {}
     });
 
-    // Remote peer hit "refresh video" → re-grab the camera here too
-    // and replace tracks. Both sides recover independently from a
-    // frozen feed without renegotiating SDP.
+    // Creator hit "refresh video" — they only re-grabbed their own
+    // camera. We do the heavy lift from the caller side: reacquire
+    // our camera AND kick off an ICE restart so the whole peer
+    // connection is rebuilt. The new offer flows through the
+    // standard rtc:offer / rtc:answer path on the creator side.
     socket.on('rtc:refresh', ({ callId }) => {
       if (callId !== callIdRef.current) return;
-      reacquireMedia();
+      fullRestart();
     });
 
     socket.on('call:billed', ({ callId, totalBilled, walletBalance }) => {

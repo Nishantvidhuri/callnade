@@ -88,6 +88,12 @@ export default function IncomingCall() {
     window.addEventListener('pageshow', onVisibility);
     window.addEventListener('focus', onVisibility);
 
+    // Creator-side refresh: we can't run ICE restart from the
+    // answerer in a clean way, so we ask the caller to do it. The
+    // caller's listener triggers a full restart (reacquire + new
+    // offer with iceRestart). We also reacquire our own camera
+    // here so both feeds refresh in lockstep — the new SDP comes in
+    // via the existing rtc:offer handler below.
     refreshRef.current = () => {
       reacquireMedia();
       socket.emit('rtc:refresh', { callId });
@@ -144,8 +150,10 @@ export default function IncomingCall() {
       try { await pcRef.current?.addIceCandidate(candidate); } catch {}
     });
 
-    // Caller pressed "Refresh video" on their side — re-grab the
-    // camera here and replaceTrack so both feeds unfreeze together.
+    // Caller pressed "Refresh video" on their side — they're doing
+    // ICE restart + new offer. We just reacquire our own camera so
+    // the renegotiated connection has a fresh stream to send back.
+    // The new SDP arrives through the existing rtc:offer listener.
     socket.on('rtc:refresh', ({ callId: id }) => {
       if (id !== callId) return;
       reacquireMedia();
