@@ -105,7 +105,12 @@ export default function ConsentForm({
           <span className="ml-auto text-[11px] text-neutral-400 tabular-nums">{today}</span>
         </div>
 
-        <div className="max-h-[44vh] sm:max-h-[55vh] overflow-y-auto px-4 py-3.5 text-[13px] leading-relaxed text-neutral-700 space-y-4">
+        {/* On mobile we drop the inner scroll cap — nested scroll
+            containers are a pain on touch and make it hard to reach
+            the declarations + CTA at the bottom. Page scroll handles
+            the long-form terms instead. Desktop still gets the
+            capped scrollbox so the form fits in one screen. */}
+        <div className="px-4 py-3.5 text-[13px] leading-relaxed text-neutral-700 space-y-4 sm:max-h-[55vh] sm:overflow-y-auto">
           {isCreator ? <CreatorTermsContent /> : <>
           <p>
             By creating an account, uploading content, interacting with users, or using any feature of

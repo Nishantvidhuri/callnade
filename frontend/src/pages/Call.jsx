@@ -121,34 +121,91 @@ export default function Call() {
     window.addEventListener('pageshow', onVisibility);
     window.addEventListener('focus', onVisibility);
 
-    // Full-restart: re-grab the camera AND tear/redo the ICE
-    // negotiation. ReplaceTrack alone doesn't fix a stuck peer
-    // connection (NAT bindings expired, network switched, ICE in a
-    // 'failed' state). `createOffer({ iceRestart: true })` forces a
-    // brand-new ICE gathering on both sides; the existing rtc:offer
-    // handler on the creator side picks it up and answers. The
-    // remote side also gets an `rtc:refresh` nudge so it reacquires
-    // its own camera in lockstep.
-    const fullRestart = async () => {
-      await reacquireMedia();
-      const pc = pcRef.current;
-      if (pc && callIdRef.current) {
-        try {
-          const offer = await pc.createOffer({ iceRestart: true });
-          await pc.setLocalDescription(offer);
-          socket.emit('rtc:offer', { callId: callIdRef.current, sdp: offer });
-        } catch {
-          /* peer connection may already be closed; nothing to do */
-        }
+    // Hard reset: blow away the entire peer connection on both
+    // sides and rebuild from scratch with fresh ICE config and a
+    // freshly-acquired local stream. This is the nuclear option
+    // for stuck calls — covers states where ICE-restart alone
+    // can't recover (pc in 'closed' / 'failed', stale DTLS, broken
+    // ontrack DOM binding). We tell the creator first so it tears
+    // down in parallel, give it a small head start, then send a
+    // brand-new offer that the creator answers on its new pc.
+    let resetting = false;
+    const hardReset = async ({ notifyPeer = true } = {}) => {
+      if (cancelled || !callIdRef.current || resetting) return;
+      resetting = true;
+      // 1. Tell creator to also tear down — gives them a head start
+      //    so their new pc exists by the time our offer arrives.
+      //    Skipped when WE're resetting because the creator asked us
+      //    to (they're already in their own reset).
+      if (notifyPeer) {
         socket.emit('rtc:refresh', { callId: callIdRef.current });
+      }
+
+      // 2. Close the old pc on our side. Wrap in try/catch in case
+      //    it's already in a closed/failed state.
+      try { pcRef.current?.close(); } catch {}
+      pcRef.current = null;
+      offerSent = false;
+      calleeReady = false;
+      // calleeAccepted stays true — we're not re-inviting, just
+      // redoing the rtc layer for an in-progress call.
+
+      // 3. Fresh getUserMedia. We don't replaceTrack because the
+      //    sender list is on the dead pc; we'll add the tracks to
+      //    the new pc below.
+      try {
+        const fresh = await getLocalStream({ video: callType === 'video' });
+        if (cancelled) {
+          fresh.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        localStreamRef.current?.getTracks().forEach((t) => {
+          try { t.stop(); } catch {}
+        });
+        localStreamRef.current = fresh;
+        if (localVideo.current) localVideo.current.srcObject = fresh;
+        attachTrackWatchers(fresh);
+      } catch {
+        return;
+      }
+
+      // 4. Wait briefly so the creator can finish their teardown +
+      //    fresh-pc creation before our offer arrives. 300ms
+      //    handles a typical mobile getUserMedia round-trip.
+      await new Promise((r) => setTimeout(r, 300));
+      if (cancelled) return;
+
+      // 5. Spin up a brand-new pc and re-wire signaling.
+      try {
+        const ice = await fetchIceConfig();
+        const pc = createPeer(ice.iceServers);
+        pcRef.current = pc;
+        const stream = localStreamRef.current;
+        if (!stream) return;
+        stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+        pc.ontrack = (e) => {
+          if (remoteVideo.current) remoteVideo.current.srcObject = e.streams[0];
+        };
+        pc.onicecandidate = (e) => {
+          if (e.candidate && callIdRef.current) {
+            socket.emit('rtc:ice', { callId: callIdRef.current, candidate: e.candidate });
+          }
+        };
+        // 6. New offer (not iceRestart — this is a fresh pc).
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit('rtc:offer', { callId: callIdRef.current, sdp: offer });
+        tuneSenders(pc).catch(() => {});
+      } catch {
+        /* fetchIceConfig / createOffer can fail transiently; user
+           can press refresh again */
+      } finally {
+        resetting = false;
       }
     };
 
-    // Expose the helper to the controls row. The button on CallShell
-    // calls this; either peer can press it and the connection
-    // re-establishes from the caller side (only the offerer can
-    // initiate an ICE restart cleanly).
-    refreshRef.current = fullRestart;
+    // Local refresh button → notify the peer + run hardReset.
+    refreshRef.current = () => hardReset({ notifyPeer: true });
 
     const cleanup = () => {
       pcRef.current?.close();
@@ -237,14 +294,17 @@ export default function Call() {
       try { await pcRef.current.addIceCandidate(candidate); } catch {}
     });
 
-    // Creator hit "refresh video" — they only re-grabbed their own
-    // camera. We do the heavy lift from the caller side: reacquire
-    // our camera AND kick off an ICE restart so the whole peer
-    // connection is rebuilt. The new offer flows through the
-    // standard rtc:offer / rtc:answer path on the creator side.
+    // Creator hit Refresh — they want a fresh connection. We do the
+    // hard reset from this side so we can send the new offer. NOTE:
+    // when WE press refresh locally, hardReset emits rtc:refresh
+    // which echoes back to us via socket.io broadcast semantics IF
+    // the server were to fan it; the server does `socket.to(room)`
+    // (skips sender) so we don't get our own emit, and this handler
+    // only fires for the OTHER peer's refresh.
     socket.on('rtc:refresh', ({ callId }) => {
       if (callId !== callIdRef.current) return;
-      fullRestart();
+      // Creator asked us to reset → don't echo rtc:refresh back.
+      hardReset({ notifyPeer: false });
     });
 
     socket.on('call:billed', ({ callId, totalBilled, walletBalance }) => {

@@ -88,16 +88,54 @@ export default function IncomingCall() {
     window.addEventListener('pageshow', onVisibility);
     window.addEventListener('focus', onVisibility);
 
-    // Creator-side refresh: we can't run ICE restart from the
-    // answerer in a clean way, so we ask the caller to do it. The
-    // caller's listener triggers a full restart (reacquire + new
-    // offer with iceRestart). We also reacquire our own camera
-    // here so both feeds refresh in lockstep — the new SDP comes in
-    // via the existing rtc:offer handler below.
-    refreshRef.current = () => {
-      reacquireMedia();
-      socket.emit('rtc:refresh', { callId });
+    // Creator-side hard reset: close the existing peer connection,
+    // reacquire the camera, build a fresh pc, and wait for the
+    // caller's new offer. Used both when WE press refresh (we then
+    // emit rtc:refresh so the caller does its hardReset and sends
+    // the new offer) and when the CALLER presses refresh (we
+    // receive rtc:refresh and need to be ready for their offer).
+    let resetting = false;
+    const creatorReset = async ({ notifyPeer = false } = {}) => {
+      if (cancelled || !callId || resetting) return;
+      resetting = true;
+      if (notifyPeer) socket.emit('rtc:refresh', { callId });
+      try { pcRef.current?.close(); } catch {}
+      pcRef.current = null;
+      try {
+        const fresh = await getLocalStream({ video: callType === 'video' });
+        if (cancelled) {
+          fresh.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        localStreamRef.current?.getTracks().forEach((t) => {
+          try { t.stop(); } catch {}
+        });
+        localStreamRef.current = fresh;
+        if (localVideo.current) localVideo.current.srcObject = fresh;
+        attachTrackWatchers(fresh);
+
+        const ice = await fetchIceConfig();
+        const pc = createPeer(ice.iceServers);
+        pcRef.current = pc;
+        fresh.getTracks().forEach((t) => pc.addTrack(t, fresh));
+        pc.ontrack = (e) => {
+          if (remoteVideo.current) remoteVideo.current.srcObject = e.streams[0];
+        };
+        pc.onicecandidate = (e) => {
+          if (e.candidate) socket.emit('rtc:ice', { callId, candidate: e.candidate });
+        };
+        // No offer to send — we're the answerer. The existing
+        // rtc:offer listener picks up the caller's new SDP.
+      } catch {
+        /* user can hit refresh again */
+      } finally {
+        resetting = false;
+      }
     };
+
+    // Refresh button on creator: do our own reset and notify the
+    // caller so they tear down too and send a fresh offer.
+    refreshRef.current = () => creatorReset({ notifyPeer: true });
 
     const cleanup = () => {
       pcRef.current?.close();
@@ -150,13 +188,12 @@ export default function IncomingCall() {
       try { await pcRef.current?.addIceCandidate(candidate); } catch {}
     });
 
-    // Caller pressed "Refresh video" on their side — they're doing
-    // ICE restart + new offer. We just reacquire our own camera so
-    // the renegotiated connection has a fresh stream to send back.
-    // The new SDP arrives through the existing rtc:offer listener.
+    // Caller pressed Refresh — they're tearing down their pc and
+    // sending a fresh offer. We tear down ours too and stand a new
+    // pc up to receive their offer.
     socket.on('rtc:refresh', ({ callId: id }) => {
       if (id !== callId) return;
-      reacquireMedia();
+      creatorReset();
     });
 
     socket.on('call:earned', ({ callId: id, totalEarned, callerBalance }) => {
