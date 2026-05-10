@@ -528,12 +528,9 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
           <>
             {/* Remote feed — always mounted so we can attach the track
                 as soon as it arrives. Hidden behind the local hero
-                while we're waiting; un-hides on connected. The local
-                preview is mirrored (scaleX(-1)) so users see
-                themselves the way they'd appear in a bathroom mirror,
-                which is what every other video-call app does. The
-                outgoing track is unaffected — the remote sees the
-                normal, un-mirrored feed. */}
+                while we're waiting; un-hides on connected. No mirror
+                transforms anywhere — both peers see each other's
+                streams in their natural orientation. */}
             <video
               ref={remoteVideo}
               autoPlay
@@ -544,14 +541,13 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
             />
 
             {showLocalAsHero ? (
-              // Pre-connect hero — full-screen selfie while ringing.
+              // Pre-connect hero — full-screen self preview while ringing.
               <video
                 ref={localVideo}
                 autoPlay
                 playsInline
                 muted
                 className="absolute inset-0 w-full h-full object-cover bg-neutral-900"
-                style={{ transform: 'scaleX(-1)' }}
               />
             ) : (
               // Connected — local moves to a corner PIP.
@@ -565,7 +561,6 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
                   playsInline
                   muted
                   className={`w-full h-full object-cover transition ${cameraOff ? 'opacity-0' : 'opacity-100'}`}
-                  style={{ transform: 'scaleX(-1)' }}
                 />
                 {cameraOff && (
                   <div className="absolute inset-0 grid place-items-center text-white/70">
