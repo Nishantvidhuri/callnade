@@ -39,8 +39,80 @@ export default function Call() {
     let calleeAccepted = false;
     let calleeReady = false;
     let offerSent = false;
+    let reacquiring = false;
     const spectatorPcs = new Map(); // adminId -> { pc, cleanup }
     const socket = getSocket();
+
+    // Camera-recovery helper. Mobile OSes hand the camera to whichever
+    // app is in the foreground — when the user briefly opens WhatsApp
+    // / Camera / etc. mid-call, our local video track gets killed
+    // (readyState='ended') or muted (.muted=true). Without this we'd
+    // freeze the last frame forever. We watch for ended/unmute events
+    // plus tab-visibility changes; on any signal we re-run
+    // getUserMedia and `replaceTrack()` on the existing peer
+    // connection (no re-negotiation needed).
+    const reacquireMedia = async () => {
+      if (reacquiring || cancelled) return;
+      if (!pcRef.current) return;
+      reacquiring = true;
+      try {
+        const fresh = await getLocalStream({ video: callType === 'video' });
+        if (cancelled) {
+          fresh.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        const senders = pcRef.current.getSenders();
+        const newAudio = fresh.getAudioTracks()[0];
+        const newVideo = fresh.getVideoTracks()[0];
+        if (newAudio) {
+          const audioSender = senders.find((s) => s.track && s.track.kind === 'audio');
+          if (audioSender) await audioSender.replaceTrack(newAudio);
+        }
+        if (newVideo) {
+          const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+          if (videoSender) await videoSender.replaceTrack(newVideo);
+        }
+        // Drop the old (dead) tracks last so the swap is gapless.
+        localStreamRef.current?.getTracks().forEach((t) => {
+          try { t.stop(); } catch {}
+        });
+        localStreamRef.current = fresh;
+        if (localVideo.current) localVideo.current.srcObject = fresh;
+        attachTrackWatchers(fresh);
+      } catch {
+        // Camera still locked by another app or permission revoked —
+        // bail; the visibility / unmute watchers will trigger again.
+      } finally {
+        reacquiring = false;
+      }
+    };
+
+    const attachTrackWatchers = (stream) => {
+      stream.getTracks().forEach((t) => {
+        // ended: underlying source went away (camera yanked, USB
+        // disconnected). Have to fully reacquire.
+        t.onended = () => reacquireMedia();
+        // unmute: OS handed the camera back after a temporary
+        // suspension (foreground swap). Often the track itself
+        // recovers, but reacquiring is cheap and idempotent so we
+        // do it anyway to handle the cases where it doesn't.
+        t.onunmute = () => reacquireMedia();
+      });
+    };
+
+    // Page visibility — when the user comes back to the callnade tab,
+    // sniff the local tracks. If any are ended or muted, kick off a
+    // reacquire. Covers the case where the OS killed our camera
+    // outside of any in-page event firing.
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      const tracks = localStreamRef.current?.getTracks() || [];
+      const dead = tracks.some((t) => t.readyState === 'ended' || t.muted);
+      if (dead) reacquireMedia();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onVisibility);
+    window.addEventListener('focus', onVisibility);
 
     const cleanup = () => {
       pcRef.current?.close();
@@ -72,6 +144,7 @@ export default function Call() {
         }
         localStreamRef.current = stream;
         if (localVideo.current) localVideo.current.srcObject = stream;
+        attachTrackWatchers(stream);
 
         const pc = createPeer(ice.iceServers);
         pcRef.current = pc;
@@ -188,6 +261,9 @@ export default function Call() {
       socket.off('call:rejected');
       socket.off('call:ended');
       socket.off('admin:spectator-arrived', onAdminJoin);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onVisibility);
+      window.removeEventListener('focus', onVisibility);
       if (callIdRef.current) socket.emit('call:hangup', { callId: callIdRef.current });
       cleanup();
       exitFullscreen();

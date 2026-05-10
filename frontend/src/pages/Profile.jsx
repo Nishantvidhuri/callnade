@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Video, Phone, Camera, Lock, BellRing, BellPlus, Check,
-  Save, LogOut, Edit3, Receipt, Shield,
+  Save, LogOut, Edit3, Receipt, Shield, Package as PackageIcon, X,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
@@ -33,6 +33,11 @@ export default function Profile() {
   // `pickerCallType` filters the modal so only audio packages show when
   // they tapped Audio (and same for Video).
   const [pickerCallType, setPickerCallType] = useState(null); // 'audio' | 'video' | null
+  // Packages-manager modal — owner-only, only renders for provider
+  // accounts. Decoupled from the inline "Edit profile" panel so a
+  // creator can jump straight to package management without
+  // toggling on the larger settings drawer.
+  const [pkgManagerOpen, setPkgManagerOpen] = useState(false);
   // Inline-settings state — only used when viewing own profile (isMe).
   const [editing, setEditing] = useState(false);
   const [settingsForm, setSettingsForm] = useState({ displayName: '', bio: '', isPrivate: true });
@@ -141,7 +146,27 @@ export default function Profile() {
 
   // Open the package picker filtered to the chosen call type. The user
   // picks a package from the modal, which then triggers startWithPackage.
+  // Open the package picker filtered to the chosen call type. Before
+  // the picker opens, do a proactive per-minute balance check against
+  // the cheapest matching package — the backend only requires one
+  // minute's worth of credits to start the call, so we mirror that
+  // here. The RechargeModal surfaces only when even one minute is
+  // out of reach. Legacy packages with no duration fall back to flat
+  // fee (perMinFor returns the full price).
   const startCall = (type = 'video') => {
+    const balance = me?.walletBalance ?? 0;
+    const perMinFor = (p) =>
+      p.durationMinutes && p.durationMinutes > 0 ? p.price / p.durationMinutes : p.price;
+    const candidates = (profile.packages || []).filter(
+      (p) => (p.callType || 'video') === type && p.price > 0,
+    );
+    const cheapest = candidates.length
+      ? candidates.reduce((min, p) => (perMinFor(p) < perMinFor(min) ? p : min))
+      : null;
+    if (cheapest && balance < perMinFor(cheapest)) {
+      setRecharge({ required: perMinFor(cheapest), balance });
+      return;
+    }
     setPickerCallType(type);
   };
 
@@ -302,6 +327,19 @@ export default function Profile() {
             >
               <Edit3 size={14} /> {editing ? 'Close edit' : 'Edit profile'}
             </button>
+            {/* Packages quick-edit — provider-only. Opens the
+                PackagesManager in a focused modal so the creator can
+                tweak prices / durations without toggling the bigger
+                "Edit profile" drawer first. */}
+            {profile.user.role === 'provider' && (
+              <button
+                type="button"
+                onClick={() => setPkgManagerOpen(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-brand-200 text-brand-600 bg-brand-50 hover:bg-brand-100 transition"
+              >
+                <PackageIcon size={14} /> Packages
+              </button>
+            )}
             <Link
               to="/billing"
               className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-neutral-200 text-neutral-700 hover:bg-neutral-50 transition"
@@ -504,6 +542,35 @@ export default function Profile() {
         required={recharge?.required || 0}
         onClose={() => setRecharge(null)}
       />
+
+      {/* Owner-only: full-screen Packages manager modal. Reuses the
+          same PackagesManager that the inline Edit-profile drawer
+          embeds; this button just gives a faster path to it. */}
+      {pkgManagerOpen && (
+        <div className="fixed inset-0 z-[80] grid place-items-end sm:place-items-center p-0 sm:p-4 bg-black/40 backdrop-blur-sm">
+          <div className="w-full sm:max-w-2xl rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl flex flex-col max-h-[90dvh] sm:max-h-[85dvh] overflow-hidden animate-[pop_150ms_ease-out]">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-neutral-200">
+              <div className="inline-flex items-center gap-2">
+                <span className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 grid place-items-center">
+                  <PackageIcon size={16} />
+                </span>
+                <p className="font-bold text-base">Manage packages</p>
+              </div>
+              <button
+                onClick={() => setPkgManagerOpen(false)}
+                aria-label="Close"
+                className="w-8 h-8 grid place-items-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-ink transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+              <PackagesManager />
+            </div>
+          </div>
+          <style>{`@keyframes pop{from{transform:scale(0.96);opacity:0}to{transform:scale(1);opacity:1}}`}</style>
+        </div>
+      )}
 
       <PackagePickerModal
         peer={{

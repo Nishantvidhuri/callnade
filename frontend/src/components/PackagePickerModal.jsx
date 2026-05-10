@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Video, X, Wallet, Phone } from 'lucide-react';
+import { Video, X, Wallet, Phone, AlertCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { fmtCredits } from '../utils/formatCredits.js';
@@ -30,6 +31,20 @@ export default function PackagePickerModal({ peer, open, onClose, onStart, callT
   const packages = callTypeFilter
     ? allPackages.filter((p) => (p.callType || 'video') === callTypeFilter)
     : allPackages;
+
+  // Match the backend rule (call.handlers.js): the caller only needs
+  // enough credits to cover the FIRST minute. The recharge banner
+  // fires only when even one minute of the cheapest package is
+  // unaffordable. `perMinFor()` falls back to full price for legacy
+  // packages with no duration.
+  const perMinFor = (p) =>
+    p.durationMinutes && p.durationMinutes > 0 ? p.price / p.durationMinutes : p.price;
+  const paidPackages = packages.filter((p) => (p.price ?? 0) > 0);
+  const cheapest = paidPackages.length
+    ? paidPackages.reduce((min, p) => (perMinFor(p) < perMinFor(min) ? p : min))
+    : null;
+  const cheapestPerMin = cheapest ? perMinFor(cheapest) : 0;
+  const cantAffordAny = !!cheapest && balance < cheapestPerMin;
 
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center p-4 bg-black/40 backdrop-blur-sm">
@@ -66,6 +81,39 @@ export default function PackagePickerModal({ peer, open, onClose, onStart, callT
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
+          {/* Low-balance prompt — appears when the viewer can't afford
+              the cheapest matching package. We still render the
+              package list below so they know what's available, but
+              the headline action becomes "recharge". */}
+          {!loading && !error && cantAffordAny && (
+            <div className="mb-4 rounded-2xl bg-amber-50 border border-amber-200 p-4">
+              <div className="flex items-start gap-2.5">
+                <span className="w-8 h-8 rounded-full bg-amber-500 text-white grid place-items-center shrink-0 mt-0.5">
+                  <AlertCircle size={16} strokeWidth={2.4} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-amber-900">
+                    Recharge to connect — your balance is low.
+                  </p>
+                  <p className="text-[12.5px] text-amber-800/90 mt-0.5 leading-snug">
+                    Even the cheapest creator costs{' '}
+                    <span className="font-bold">₹{fmtCredits(cheapestPerMin)}/min</span>
+                    {' '}and you only have{' '}
+                    <span className="font-bold">₹{fmtCredits(balance)}</span>
+                    {' '}in your wallet — top up to connect.
+                  </p>
+                </div>
+              </div>
+              <Link
+                to="/billing"
+                onClick={onClose}
+                className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-full text-white bg-tinder shadow-md shadow-tinder/30 hover:brightness-110 transition"
+              >
+                <Wallet size={14} strokeWidth={2.4} /> Recharge wallet
+              </Link>
+            </div>
+          )}
+
           {loading ? (
             <p className="text-sm text-neutral-400 text-center py-8">Loading packages…</p>
           ) : error ? (
@@ -92,7 +140,12 @@ export default function PackagePickerModal({ peer, open, onClose, onStart, callT
             <ul className="space-y-2.5">
               {packages.map((p) => {
                 const perMin = p.durationMinutes ? p.price / p.durationMinutes : null;
-                const insufficient = balance < p.price;
+                // Affordability rule mirrors the backend: only the
+                // first minute needs to be in the wallet at start;
+                // the call ends when the wallet hits zero. Legacy
+                // packages without a duration fall back to flat-fee.
+                const minCharge = perMin ?? p.price;
+                const insufficient = balance < minCharge;
                 const isAudio = p.callType === 'audio';
                 return (
                   <li
@@ -128,8 +181,13 @@ export default function PackagePickerModal({ peer, open, onClose, onStart, callT
                         {perMin != null ? `≈ ${perMin.toFixed(1)} credits/min` : 'flat fee'}
                       </p>
                       {insufficient ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600">
-                          <Wallet size={11} /> Need {p.price}
+                        <span
+                          title={`Minimum to start: ${fmtCredits(minCharge)} credits (one minute)`}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600"
+                        >
+                          <Wallet size={11} />
+                          Need {fmtCredits(minCharge)}
+                          {perMin != null && <span className="text-[10px]">/min</span>}
                         </span>
                       ) : (
                         <button
@@ -150,12 +208,24 @@ export default function PackagePickerModal({ peer, open, onClose, onStart, callT
           )}
         </div>
 
-        <div className="px-5 py-3 border-t border-neutral-200 flex items-center justify-between text-xs">
-          <span className="text-neutral-500">Your balance</span>
-          <span className="font-bold tabular-nums text-emerald-700">
-            <Wallet size={11} className="inline mr-1 -mt-0.5" />
-            {fmtCredits(balance)} credits
-          </span>
+        <div className="px-5 py-3 border-t border-neutral-200 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-neutral-500 shrink-0">Your balance</span>
+            <span className="font-bold tabular-nums text-emerald-700 inline-flex items-center gap-1">
+              <Wallet size={11} />
+              {fmtCredits(balance)}
+            </span>
+          </div>
+          {/* Quick recharge — always visible so a viewer can top up
+              without bouncing back to billing manually, regardless of
+              whether they can afford the current packages or not. */}
+          <Link
+            to="/billing"
+            onClick={onClose}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-full text-white bg-tinder shadow-md shadow-tinder/30 hover:brightness-110 transition shrink-0"
+          >
+            <Wallet size={12} strokeWidth={2.4} /> Recharge
+          </Link>
         </div>
       </div>
       <style>{`@keyframes pop{from{transform:scale(0.94);opacity:0}to{transform:scale(1);opacity:1}}`}</style>

@@ -363,14 +363,20 @@ export function registerCallHandlers(io, socket) {
         earnRate = pkg.price / pkg.durationMinutes;
         pkgId = pkg._id;
 
-        // Caller must have enough credits to cover the full marked-up package price
+        // Caller only needs enough credits for the FIRST minute. The
+        // call-time billing ticker keeps debiting per second; once the
+        // wallet hits zero the call ends with reason
+        // 'insufficient_credits'. This lets viewers with smaller
+        // balances still connect and chat for as long as they can
+        // afford, instead of being blocked from a 30-minute package
+        // because their wallet is at the cost of 5 minutes.
         const caller = await User.findById(socket.user.id).select('walletBalance').lean();
         const balance = caller?.walletBalance || 0;
-        if (balance < subscriberTotal) {
+        if (balance < billRate) {
           return ack?.({
-            error: 'Not enough credits',
+            error: 'Not enough credits for one minute',
             code: 'INSUFFICIENT_CREDITS',
-            required: subscriberTotal,
+            required: billRate,
             balance,
           });
         }
