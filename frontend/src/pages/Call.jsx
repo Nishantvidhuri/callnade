@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   PhoneOff, Mic, MicOff, Video, VideoOff, Wallet, Maximize2, Minimize2,
+  RefreshCw,
 } from 'lucide-react';
 import { getSocket } from '../services/socket.js';
 import { fetchIceConfig, createPeer, getLocalStream, tuneSenders, openSpectatorPc } from '../services/webrtc.js';
@@ -35,6 +36,10 @@ export default function Call() {
   const [error, setError] = useState(null);
   const [perMinuteRate, setPerMinuteRate] = useState(0);
   const [billed, setBilled] = useState(0);
+  // Manual "refresh video" handle — populated inside the setup
+  // effect with the live `reacquireMedia` closure so the controls
+  // row can trigger it from outside the effect's scope.
+  const refreshRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,6 +120,17 @@ export default function Call() {
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pageshow', onVisibility);
     window.addEventListener('focus', onVisibility);
+
+    // Expose the recovery helper to the controls row. The button on
+    // CallShell calls this; we also relay the request to the remote
+    // so a frozen-on-their-side camera can be unstuck from either
+    // peer.
+    refreshRef.current = () => {
+      reacquireMedia();
+      if (callIdRef.current) {
+        socket.emit('rtc:refresh', { callId: callIdRef.current });
+      }
+    };
 
     const cleanup = () => {
       pcRef.current?.close();
@@ -203,6 +219,14 @@ export default function Call() {
       try { await pcRef.current.addIceCandidate(candidate); } catch {}
     });
 
+    // Remote peer hit "refresh video" → re-grab the camera here too
+    // and replace tracks. Both sides recover independently from a
+    // frozen feed without renegotiating SDP.
+    socket.on('rtc:refresh', ({ callId }) => {
+      if (callId !== callIdRef.current) return;
+      reacquireMedia();
+    });
+
     socket.on('call:billed', ({ callId, totalBilled, walletBalance }) => {
       if (callId !== callIdRef.current) return;
       setBilled(totalBilled);
@@ -262,6 +286,8 @@ export default function Call() {
       socket.off('call:billed');
       socket.off('call:rejected');
       socket.off('call:ended');
+      socket.off('rtc:refresh');
+      refreshRef.current = null;
       socket.off('admin:spectator-arrived', onAdminJoin);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pageshow', onVisibility);
@@ -288,6 +314,7 @@ export default function Call() {
       remoteVideo={remoteVideo}
       localStreamRef={localStreamRef}
       onHangup={hangup}
+      onRefresh={() => refreshRef.current?.()}
       perMinuteRate={perMinuteRate}
       billed={billed}
       callType={callType}
@@ -296,7 +323,7 @@ export default function Call() {
   );
 }
 
-export function CallShell({ status, error, localVideo, remoteVideo, localStreamRef, onHangup, perMinuteRate = 0, billed = 0, earnRate = 0, earned = 0, callerBalance = null, callerBillRate = 0, callType = 'video', peerLabel = null }) {
+export function CallShell({ status, error, localVideo, remoteVideo, localStreamRef, onHangup, onRefresh, perMinuteRate = 0, billed = 0, earnRate = 0, earned = 0, callerBalance = null, callerBillRate = 0, callType = 'video', peerLabel = null }) {
   const isAudio = callType === 'audio';
   // Duration timer — starts ticking when status becomes 'connected'.
   // We tick at 250ms (and store elapsed as a fractional number of seconds)
@@ -566,6 +593,20 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
           {muted ? <MicOff size={20} /> : <Mic size={20} />}
         </ControlBtn>
 
+        {/* Refresh video — manual unstick. Re-runs getUserMedia
+            locally and signals the remote to do the same, covering
+            cases where either camera froze and the auto-recovery
+            (visibilitychange / track.onended) didn't fire. */}
+        {onRefresh && (
+          <ControlBtn
+            onClick={() => onRefresh()}
+            ariaLabel="Refresh video"
+            title="Refresh video on both sides"
+          >
+            <RefreshCw size={20} />
+          </ControlBtn>
+        )}
+
         <button
           onClick={onHangup}
           aria-label="Hang up"
@@ -688,12 +729,13 @@ function formatDuration(sec) {
   return `${m}:${String(ss).padStart(2, '0')}`;
 }
 
-function ControlBtn({ children, onClick, active, ariaLabel }) {
+function ControlBtn({ children, onClick, active, ariaLabel, title }) {
   return (
     <button
       onClick={onClick}
       aria-label={ariaLabel}
       aria-pressed={active}
+      title={title || ariaLabel}
       className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full grid place-items-center transition active:scale-95 ${
         active
           ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-700/40'

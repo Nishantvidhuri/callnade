@@ -472,6 +472,15 @@ export function registerCallHandlers(io, socket) {
     socket.to(room(callId)).emit('rtc:ice', { callId, candidate });
   });
 
+  // Manual "refresh video" — either peer can ask the other to
+  // re-grab their camera. Plain pass-through; the receiving client
+  // runs the same reacquireMedia helper used by the auto-recovery
+  // path, so no SDP renegotiation is needed.
+  socket.on('rtc:refresh', ({ callId }) => {
+    if (!authorizedFor(socket, callId)) return;
+    socket.to(room(callId)).emit('rtc:refresh', { callId });
+  });
+
   socket.on('call:hangup', async ({ callId }) => {
     const c = calls.get(callId);
     if (!c) return;
