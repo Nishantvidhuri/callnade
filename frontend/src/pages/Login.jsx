@@ -90,7 +90,7 @@ export default function Login() {
             placeholder="Password"
             autoComplete="current-password"
             required
-            minLength={8}
+            minLength={6}
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />

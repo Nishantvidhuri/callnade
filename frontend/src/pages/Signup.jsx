@@ -79,6 +79,19 @@ export default function Signup() {
   }, [asCreator]);
   const [agree, setAgree] = useState(true);
   const [error, setError] = useState(null);
+  // Per-field "has been blurred" tracking. We only render the inline
+  // error after the user has tried to leave the field, so they never
+  // see a "please enter X" while they're still mid-typing.
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const passwordEmpty = passwordTouched && form.password.length === 0;
+  const passwordTooShort =
+    passwordTouched && form.password.length > 0 && form.password.length < 6;
+  const emailEmpty = emailTouched && form.email.trim().length === 0;
+  const emailInvalid =
+    emailTouched &&
+    form.email.trim().length > 0 &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
   const [loading, setLoading] = useState(false);
   // Two-step signup: 'form' (personal/details) → 'consent' (T&C + declarations).
   const [step, setStep] = useState('form');
@@ -126,7 +139,23 @@ export default function Signup() {
     setSelfie(f);
   };
 
-  const set = (field, value) => setForm((f) => ({ ...f, [field]: value }));
+  // Field setter — also clears any current step-1 error message so
+  // the moment the user fixes the offending field they aren't still
+  // staring at a stale "please enter X" warning. They can hit
+  // Continue immediately once the form's actually correct.
+  const set = (field, value) => {
+    setForm((f) => ({ ...f, [field]: value }));
+    if (error) setError(null);
+  };
+
+  // Same live-clear for the non-`set` mutators — package edits and
+  // the verification-photo upload both feed into step-1 validation
+  // and shouldn't leave a stale error visible after the user fixes
+  // the underlying problem.
+  useEffect(() => {
+    if (error) setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [packages, verifyPhoto]);
 
   const setPkg = (i, field, value) =>
     setPackages((arr) => arr.map((p, idx) => (idx === i ? { ...p, [field]: value } : p)));
@@ -136,13 +165,35 @@ export default function Signup() {
 
   // Step 1: validate the details form. If everything's good, advance to the
   // consent stage. The actual API signup happens AFTER they accept.
+  // Every required field is checked here in addition to the browser's
+  // built-in `required` so we never advance with blanks even if the
+  // user submits via JS or the browser skips native validation.
+  // Referral and (regular-user) bio are the only optional fields.
   const submit = (e) => {
     e.preventDefault();
-    if (!agree) return setError('Please accept the Terms to continue.');
+
+    if (!form.firstName.trim()) return setError('Please enter your first name.');
+    if (!form.lastName.trim()) return setError('Please enter your last name.');
+    if (!form.gender) return setError('Please pick whether you’re a girl or a boy.');
+    const username = form.username.trim();
+    if (!username) return setError('Please choose a username.');
+    if (!/^[a-z0-9_]{3,24}$/i.test(username)) {
+      return setError('Username must be 3–24 characters, letters / numbers / underscores only.');
+    }
+    const email = form.email.trim();
+    if (!email) return setError('Please enter your email.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return setError('That doesn’t look like a valid email address.');
+    }
+    if (!form.password) return setError('Please choose a password.');
+    if (form.password.length < 6) {
+      return setError('Password must be at least 6 characters.');
+    }
     if (!form.dateOfBirth) return setError('Please enter your date of birth.');
     const age = ageFromIso(form.dateOfBirth);
     if (age == null) return setError('Please enter a valid date of birth.');
     if (age < 18) return setError('You must be 18 or older to use callnade.');
+
     if (asCreator) {
       if (!verifyPhoto) {
         return setError('Please complete the live verification photo before continuing.');
@@ -152,6 +203,9 @@ export default function Signup() {
         return setError('Add at least one package with a title and price.');
       }
     }
+
+    if (!agree) return setError('Please accept the Terms to continue.');
+
     setError(null);
     setStep('consent');
     // Scroll to top of the page so the new content is visible from the start.
@@ -484,18 +538,36 @@ export default function Signup() {
               required
               value={form.email}
               onChange={(e) => set('email', e.target.value)}
+              onBlur={() => setEmailTouched(true)}
             />
+            {emailEmpty && (
+              <small className="text-rose-600 text-xs">Please enter your email.</small>
+            )}
+            {emailInvalid && (
+              <small className="text-rose-600 text-xs">
+                That doesn’t look like a valid email address.
+              </small>
+            )}
           </AuthField>
 
           <AuthField label="Password">
             <PasswordInput
-              placeholder="At least 8 characters"
+              placeholder="At least 6 characters"
               autoComplete="new-password"
               required
-              minLength={8}
+              minLength={6}
               value={form.password}
               onChange={(e) => set('password', e.target.value)}
+              onBlur={() => setPasswordTouched(true)}
             />
+            {passwordEmpty && (
+              <small className="text-rose-600 text-xs">Please enter a password.</small>
+            )}
+            {passwordTooShort && (
+              <small className="text-rose-600 text-xs">
+                Password must be at least 6 characters.
+              </small>
+            )}
           </AuthField>
 
           {/* Referral code — available to both regular users and

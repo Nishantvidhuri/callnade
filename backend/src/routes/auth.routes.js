@@ -17,7 +17,7 @@ const signupSchema = z.object({
       .max(24)
       .regex(/^[a-z0-9_]+$/i)
       .transform((s) => s.toLowerCase()),
-    password: z.string().min(8).max(128),
+    password: z.string().min(6).max(128),
     displayName: z.string().max(60).optional(),
     role: z.enum(['user', 'provider']).optional(),
     dateOfBirth: z.string().optional(),
@@ -38,7 +38,7 @@ const signupSchema = z.object({
 const loginSchema = z.object({
   body: z.object({
     email: z.string().email(),
-    password: z.string().min(8).max(128),
+    password: z.string().min(6).max(128),
   }),
 });
 
