@@ -21,11 +21,77 @@ export default function IncomingCall() {
   const [callerBalance, setCallerBalance] = useState(loc.state?.callerBalance || 0);
   const [callType] = useState(loc.state?.callType === 'audio' ? 'audio' : 'video');
   const [callerLabel] = useState(loc.state?.callerLabel || null);
+  // Live handle to the camera-reacquire helper; CallShell's refresh
+  // button calls this from outside the setup effect's closure.
+  const refreshRef = useRef(null);
 
   useEffect(() => {
     const socket = getSocket();
     let cancelled = false;
+    let reacquiring = false;
     const spectatorPcs = new Map();
+
+    // Same camera-recovery helper as Call.jsx — re-runs getUserMedia
+    // and `replaceTrack()` on the existing peer connection so a
+    // frozen feed (other app grabbed the camera, OS suspended the
+    // track) recovers without renegotiation. Triggered automatically
+    // by track lifecycle events / visibility changes, AND manually
+    // by the new "Refresh video" button on the controls row.
+    const reacquireMedia = async () => {
+      if (reacquiring || cancelled) return;
+      if (!pcRef.current) return;
+      reacquiring = true;
+      try {
+        const fresh = await getLocalStream({ video: callType === 'video' });
+        if (cancelled) {
+          fresh.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        const senders = pcRef.current.getSenders();
+        const newAudio = fresh.getAudioTracks()[0];
+        const newVideo = fresh.getVideoTracks()[0];
+        if (newAudio) {
+          const audioSender = senders.find((s) => s.track && s.track.kind === 'audio');
+          if (audioSender) await audioSender.replaceTrack(newAudio);
+        }
+        if (newVideo) {
+          const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+          if (videoSender) await videoSender.replaceTrack(newVideo);
+        }
+        localStreamRef.current?.getTracks().forEach((t) => {
+          try { t.stop(); } catch {}
+        });
+        localStreamRef.current = fresh;
+        if (localVideo.current) localVideo.current.srcObject = fresh;
+        attachTrackWatchers(fresh);
+      } catch {
+        /* camera held by another app or denied — bail; future events retry */
+      } finally {
+        reacquiring = false;
+      }
+    };
+
+    const attachTrackWatchers = (stream) => {
+      stream.getTracks().forEach((t) => {
+        t.onended = () => reacquireMedia();
+        t.onunmute = () => reacquireMedia();
+      });
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      const tracks = localStreamRef.current?.getTracks() || [];
+      const dead = tracks.some((t) => t.readyState === 'ended' || t.muted);
+      if (dead) reacquireMedia();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onVisibility);
+    window.addEventListener('focus', onVisibility);
+
+    refreshRef.current = () => {
+      reacquireMedia();
+      socket.emit('rtc:refresh', { callId });
+    };
 
     const cleanup = () => {
       pcRef.current?.close();
@@ -43,6 +109,7 @@ export default function IncomingCall() {
         if (cancelled) return stream.getTracks().forEach((t) => t.stop());
         localStreamRef.current = stream;
         if (localVideo.current) localVideo.current.srcObject = stream;
+        attachTrackWatchers(stream);
 
         const pc = createPeer(ice.iceServers);
         pcRef.current = pc;
@@ -75,6 +142,13 @@ export default function IncomingCall() {
     socket.on('rtc:ice', async ({ callId: id, candidate }) => {
       if (id !== callId) return;
       try { await pcRef.current?.addIceCandidate(candidate); } catch {}
+    });
+
+    // Caller pressed "Refresh video" on their side — re-grab the
+    // camera here and replaceTrack so both feeds unfreeze together.
+    socket.on('rtc:refresh', ({ callId: id }) => {
+      if (id !== callId) return;
+      reacquireMedia();
     });
 
     socket.on('call:earned', ({ callId: id, totalEarned, callerBalance }) => {
@@ -128,10 +202,15 @@ export default function IncomingCall() {
       cancelled = true;
       socket.off('rtc:offer');
       socket.off('rtc:ice');
+      socket.off('rtc:refresh');
       socket.off('call:earned');
       socket.off('call:ended');
       socket.off('call:rejected');
       socket.off('admin:spectator-arrived', onAdminJoin);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onVisibility);
+      window.removeEventListener('focus', onVisibility);
+      refreshRef.current = null;
       socket.emit('call:hangup', { callId });
       cleanup();
       exitFullscreen();
@@ -151,6 +230,7 @@ export default function IncomingCall() {
       remoteVideo={remoteVideo}
       localStreamRef={localStreamRef}
       onHangup={hangup}
+      onRefresh={() => refreshRef.current?.()}
       earnRate={earnRate}
       earned={earned}
       callerBalance={callerBalance}
