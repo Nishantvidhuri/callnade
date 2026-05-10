@@ -704,12 +704,28 @@ export async function adminApproveTopup(adminId, requestId, { adminNote } = {}) 
     'admin approved topup',
   );
 
-  // Referral payout: only on the FIRST approval (the early-return
-  // above guards against double payout) and only when the user has a
-  // referrer that's still active. We use $inc to avoid a load+save
-  // race with concurrent billing ticks on the referrer's wallet.
+  // Referral payout: fires once, on the user's FIRST approved
+  // top-up. Subsequent top-ups credit the user's wallet normally
+  // but no longer pay the referrer — otherwise a referrer gets
+  // milked every time someone refills, which we don't want for
+  // regular-user referrals (creator referrals stay separate, paid
+  // per call for 30 days). We use $inc to avoid a load+save race
+  // with concurrent billing ticks on the referrer's wallet.
   let referralPayout = 0;
+  let isFirstApprovedTopup = false;
   if (user.referredBy) {
+    // Count *other* approved top-ups by this user. The current
+    // request is already saved as approved above, so we exclude it
+    // by id. Zero means this is the user's first.
+    const priorApproved = await WalletRequest.countDocuments({
+      userId: user._id,
+      type: 'topup',
+      status: 'approved',
+      _id: { $ne: request._id },
+    });
+    isFirstApprovedTopup = priorApproved === 0;
+  }
+  if (user.referredBy && isFirstApprovedTopup) {
     referralPayout = round2(request.amount * REFERRAL_RATE);
     if (referralPayout > 0) {
       try {
