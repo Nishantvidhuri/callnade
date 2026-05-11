@@ -2,11 +2,9 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Check } from 'lucide-react';
 import { api } from '../services/api.js';
-import { googleSignIn } from '../services/google.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import AuthLayout from '../components/AuthLayout.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
-import SocialButtons from '../components/SocialButtons.jsx';
 import { AuthField, IconInput } from '../components/AuthField.jsx';
 
 const linkCls = 'text-ink font-bold underline underline-offset-2';
@@ -35,26 +33,6 @@ export default function Login() {
       nav('/', { replace: true });
     } catch (err) {
       setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogle = async () => {
-    if (!agree) return setError('Please accept the Terms to continue.');
-    setError(null);
-    setLoading(true);
-    try {
-      const idToken = await googleSignIn();
-      const { data } = await api.post('/auth/google', { idToken });
-      useAuthStore.getState().setAuth(data);
-      // Always land on home after login. Previously we honored
-      // `loc.state.from` (the page they were trying to reach when
-      // RequireAuth bounced them here) — but the product wants the
-      // home tab as the post-login starting point regardless.
-      nav('/', { replace: true });
-    } catch (err) {
-      setError(err.message || 'Google sign-in failed');
     } finally {
       setLoading(false);
     }
@@ -112,13 +90,6 @@ export default function Login() {
         <Checkbox checked={agree} onChange={setAgree}>
           I agree to the <a href="#" className={linkCls}>Terms &amp; Condition</a>
         </Checkbox>
-
-        <Divider />
-
-        <SocialButtons
-          onGoogle={handleGoogle}
-          onFacebook={() => setError('Facebook sign-in coming soon')}
-        />
       </form>
     </AuthLayout>
   );
@@ -141,15 +112,6 @@ function Checkbox({ checked, onChange, children }) {
   );
 }
 
-function Divider() {
-  return (
-    <div className="flex items-center gap-3 text-neutral-500 text-xs my-0.5">
-      <span className="flex-1 h-px bg-neutral-200" />
-      <span>or</span>
-      <span className="flex-1 h-px bg-neutral-200" />
-    </div>
-  );
-}
 
 function Spinner() {
   return (

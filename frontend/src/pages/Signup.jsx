@@ -2,19 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Mail, User, Check, Sparkles, Plus, Trash2, Camera, X,
-  Upload, ShieldCheck,
+  Upload, ShieldCheck, FileText,
 } from 'lucide-react';
+import UserTermsContent from '../components/UserTermsContent.jsx';
+import CreatorTermsContent from '../components/CreatorTermsContent.jsx';
 import { api } from '../services/api.js';
-import { googleSignIn } from '../services/google.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { uploadAvatar, uploadVerification } from '../services/mediaUpload.js';
 import AuthLayout from '../components/AuthLayout.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
-import SocialButtons from '../components/SocialButtons.jsx';
 import { AuthField, IconInput, inputCls } from '../components/AuthField.jsx';
 import DateOfBirthInput from '../components/DateOfBirthInput.jsx';
 import LiveCaptureModal from '../components/LiveCaptureModal.jsx';
-import ConsentForm from '../components/ConsentForm.jsx';
 
 // Gender-tile avatars. Swap the URLs for your own R2-hosted PNGs/SVGs
 // once you've uploaded them — or leave as-is and the tiles will fall
@@ -93,8 +92,6 @@ export default function Signup() {
     form.email.trim().length > 0 &&
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
   const [loading, setLoading] = useState(false);
-  // Two-step signup: 'form' (personal/details) → 'consent' (T&C + declarations).
-  const [step, setStep] = useState('form');
   const [selfie, setSelfie] = useState(null); // optional uploaded avatar photo
   const [selfiePreview, setSelfiePreview] = useState(null);
   const [verifyPhoto, setVerifyPhoto] = useState(null); // mandatory live-camera selfie
@@ -163,23 +160,19 @@ export default function Signup() {
   const addPkg = () => setPackages((arr) => [...arr, blankPackage()]);
   const removePkg = (i) => setPackages((arr) => arr.filter((_, idx) => idx !== i));
 
-  // Step 1: validate the details form. If everything's good, advance to the
-  // consent stage. The actual API signup happens AFTER they accept.
-  // Every required field is checked here in addition to the browser's
-  // built-in `required` so we never advance with blanks even if the
-  // user submits via JS or the browser skips native validation.
-  // Referral and (regular-user) bio are the only optional fields.
+  // Single-page signup: validate every required field, confirm the
+  // viewer ticked the Terms checkbox, then call the API directly.
+  // (We used to push a separate consent screen here; that was merged
+  // back into this page so the whole flow fits on one form.)
   const submit = (e) => {
     e.preventDefault();
 
     if (!form.firstName.trim()) return setError('Please enter your first name.');
     if (!form.lastName.trim()) return setError('Please enter your last name.');
     if (!form.gender) return setError('Please pick whether you’re a girl or a boy.');
-    const username = form.username.trim();
-    if (!username) return setError('Please choose a username.');
-    if (!/^[a-z0-9_]{3,24}$/i.test(username)) {
-      return setError('Username must be 3–24 characters, letters / numbers / underscores only.');
-    }
+    // Username is auto-derived from name + email by deriveUsername()
+    // at submit time — there's no username field on the form, so we
+    // skip validating it here.
     const email = form.email.trim();
     if (!email) return setError('Please enter your email.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -207,13 +200,22 @@ export default function Signup() {
     if (!agree) return setError('Please accept the Terms to continue.');
 
     setError(null);
-    setStep('consent');
-    // Scroll to top of the page so the new content is visible from the start.
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'instant' });
+    // Synthesise the consent record from data already on the form.
+    // FullName comes from first + last; signature reuses the same
+    // value (we no longer ask for a separate signed line). The
+    // backend keeps these fields populated for the consent PDF
+    // and audit row exactly as before.
+    const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
+    acceptAndCreate({
+      fullName,
+      signature: fullName,
+      acceptedAt: new Date().toISOString(),
+    });
   };
 
-  // Step 2: user accepted the consent form. Now do the actual signup +
-  // uploads + packages.
+  // Submit the form: signup API call, plus avatar / verification /
+  // packages uploads. Called from `submit` after every field passes
+  // validation (we no longer route through a second consent screen).
   const acceptAndCreate = async ({ fullName, signature, acceptedAt }) => {
     setError(null);
     setLoading(true);
@@ -277,35 +279,10 @@ export default function Signup() {
       }
     } catch (err) {
       setError(err.message);
-      // Stay on the consent step so the user can retry.
     } finally {
       setLoading(false);
     }
   };
-
-  // Step 2: consent form takes over the AuthLayout.
-  if (step === 'consent') {
-    return (
-      <AuthLayout
-        tone="cool"
-        size={asCreator ? 'wide' : 'compact'}
-        title={asCreator ? 'Almost there, creator' : 'Almost there'}
-        subtitle="One last step — review and confirm to finish creating your account."
-      >
-        <ConsentForm
-          defaultName={`${form.firstName} ${form.lastName}`.trim()}
-          isCreator={asCreator}
-          submitting={loading}
-          error={error}
-          onBack={() => {
-            setError(null);
-            setStep('form');
-          }}
-          onAccept={acceptAndCreate}
-        />
-      </AuthLayout>
-    );
-  }
 
   return (
     <AuthLayout
@@ -686,6 +663,46 @@ export default function Signup() {
           </>
         )}
 
+        {/* Terms & community guidelines — read on this page, no
+            navigating away. Mobile drops the inner scroll so the
+            whole signup form scrolls as one; desktop keeps a capped
+            scrollbox so the agreement checkbox below stays visible. */}
+        <div className="rounded-2xl border border-neutral-200 bg-neutral-50 overflow-hidden">
+          <div className="px-4 py-3 border-b border-neutral-200 bg-white flex items-center gap-2">
+            <FileText size={14} className="text-neutral-500" />
+            <p className="text-sm font-semibold">
+              {asCreator ? 'Creator terms & conditions' : 'Terms & community guidelines'}
+            </p>
+          </div>
+          <div className="px-4 py-3.5 text-[13px] leading-relaxed text-neutral-700 space-y-4 sm:max-h-[40vh] sm:overflow-y-auto">
+            {asCreator ? <CreatorTermsContent /> : <UserTermsContent />}
+          </div>
+        </div>
+
+        {/* Agreement tick — has to be on before Continue does
+            anything. Refers to the box above instead of routing to a
+            separate page. */}
+        <button
+          type="button"
+          onClick={() => setAgree((v) => !v)}
+          aria-pressed={agree}
+          className="flex items-start gap-3 text-left text-[13px] leading-snug text-neutral-700 group"
+        >
+          <span
+            className={`mt-0.5 w-5 h-5 rounded-md grid place-items-center shrink-0 transition border-2 ${
+              agree
+                ? 'bg-tinder border-tinder text-white'
+                : 'bg-white border-neutral-300 text-transparent group-hover:border-neutral-400'
+            }`}
+          >
+            <Check size={13} strokeWidth={3.2} />
+          </span>
+          <span>
+            I have read, understood, and agree to the{' '}
+            <span className="text-tinder font-semibold">terms above</span>.
+          </span>
+        </button>
+
         {error && (
           <div role="alert" className="px-4 py-3 rounded-2xl bg-rose-100 text-rose-800 border border-rose-200 text-sm">
             {error}
@@ -693,35 +710,8 @@ export default function Signup() {
         )}
 
         <button type="submit" className={ctaCls} disabled={loading}>
-          {loading ? <Spinner /> : 'Continue'}
+          {loading ? <Spinner /> : asCreator ? 'Create creator account' : 'Create account'}
         </button>
-
-        <p className="text-[11px] text-neutral-500 text-center leading-relaxed">
-          You'll review and accept our terms &amp; community guidelines on the next step.
-        </p>
-
-        {!asCreator && (
-          <>
-            <Divider />
-            <SocialButtons
-              onGoogle={async () => {
-                setError(null);
-                setLoading(true);
-                try {
-                  const idToken = await googleSignIn();
-                  const { data } = await api.post('/auth/google', { idToken });
-                  useAuthStore.getState().setAuth(data);
-                  nav('/', { replace: true });
-                } catch (err) {
-                  setError(err.message || 'Google sign-in failed');
-                } finally {
-                  setLoading(false);
-                }
-              }}
-              onFacebook={() => setError('Facebook sign-up coming soon')}
-            />
-          </>
-        )}
 
           </>
         )}

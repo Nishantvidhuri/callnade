@@ -5,7 +5,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { getSocket } from '../services/socket.js';
-import { fetchIceConfig, createPeer, getLocalStream, tuneSenders, openSpectatorPc } from '../services/webrtc.js';
+import { joinAndPublish, republishLocalMedia } from '../services/zego.js';
 import { exitFullscreen } from '../utils/fullscreen.js';
 import { useAuthStore } from '../stores/auth.store.js';
 
@@ -29,7 +29,6 @@ export default function Call() {
   const nav = useNavigate();
   const localVideo = useRef();
   const remoteVideo = useRef();
-  const pcRef = useRef(null);
   const localStreamRef = useRef(null);
   const callIdRef = useRef(null);
   const [status, setStatus] = useState('starting');
@@ -37,223 +36,94 @@ export default function Call() {
   const [perMinuteRate, setPerMinuteRate] = useState(0);
   const [billed, setBilled] = useState(0);
   // Manual "refresh video" handle — populated inside the setup
-  // effect with the live `reacquireMedia` closure so the controls
+  // effect with the live Zego republish closure so the controls
   // row can trigger it from outside the effect's scope.
   const refreshRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
-    let calleeAccepted = false;
-    let calleeReady = false;
-    let offerSent = false;
-    let reacquiring = false;
-    const spectatorPcs = new Map(); // adminId -> { pc, cleanup }
+    let zegoSession = null; // { localStream, streamId, leave }
     const socket = getSocket();
 
-    // Camera-recovery helper. Mobile OSes hand the camera to whichever
-    // app is in the foreground — when the user briefly opens WhatsApp
-    // / Camera / etc. mid-call, our local video track gets killed
-    // (readyState='ended') or muted (.muted=true). Without this we'd
-    // freeze the last frame forever. We watch for ended/unmute events
-    // plus tab-visibility changes; on any signal we re-run
-    // getUserMedia and `replaceTrack()` on the existing peer
-    // connection (no re-negotiation needed).
-    const reacquireMedia = async () => {
-      if (reacquiring || cancelled) return;
-      if (!pcRef.current) return;
-      reacquiring = true;
-      try {
-        const fresh = await getLocalStream({ video: callType === 'video' });
-        if (cancelled) {
-          fresh.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        const senders = pcRef.current.getSenders();
-        const newAudio = fresh.getAudioTracks()[0];
-        const newVideo = fresh.getVideoTracks()[0];
-        if (newAudio) {
-          const audioSender = senders.find((s) => s.track && s.track.kind === 'audio');
-          if (audioSender) await audioSender.replaceTrack(newAudio);
-        }
-        if (newVideo) {
-          const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
-          if (videoSender) await videoSender.replaceTrack(newVideo);
-        }
-        // Drop the old (dead) tracks last so the swap is gapless.
-        localStreamRef.current?.getTracks().forEach((t) => {
-          try { t.stop(); } catch {}
-        });
-        localStreamRef.current = fresh;
-        if (localVideo.current) localVideo.current.srcObject = fresh;
-        attachTrackWatchers(fresh);
-      } catch {
-        // Camera still locked by another app or permission revoked —
-        // bail; the visibility / unmute watchers will trigger again.
-      } finally {
-        reacquiring = false;
+    const cleanup = async () => {
+      if (zegoSession) {
+        const session = zegoSession;
+        zegoSession = null;
+        try { await session.leave(); } catch {}
       }
-    };
-
-    const attachTrackWatchers = (stream) => {
-      stream.getTracks().forEach((t) => {
-        // ended: underlying source went away (camera yanked, USB
-        // disconnected). Have to fully reacquire.
-        t.onended = () => reacquireMedia();
-        // unmute: OS handed the camera back after a temporary
-        // suspension (foreground swap). Often the track itself
-        // recovers, but reacquiring is cheap and idempotent so we
-        // do it anyway to handle the cases where it doesn't.
-        t.onunmute = () => reacquireMedia();
-      });
-    };
-
-    // Page visibility — when the user comes back to the callnade tab,
-    // sniff the local tracks. If any are ended or muted, kick off a
-    // reacquire. Covers the case where the OS killed our camera
-    // outside of any in-page event firing.
-    const onVisibility = () => {
-      if (document.visibilityState !== 'visible') return;
-      const tracks = localStreamRef.current?.getTracks() || [];
-      const dead = tracks.some((t) => t.readyState === 'ended' || t.muted);
-      if (dead) reacquireMedia();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('pageshow', onVisibility);
-    window.addEventListener('focus', onVisibility);
-
-    // Hard reset: blow away the entire peer connection on both
-    // sides and rebuild from scratch with fresh ICE config and a
-    // freshly-acquired local stream. This is the nuclear option
-    // for stuck calls — covers states where ICE-restart alone
-    // can't recover (pc in 'closed' / 'failed', stale DTLS, broken
-    // ontrack DOM binding). We tell the creator first so it tears
-    // down in parallel, give it a small head start, then send a
-    // brand-new offer that the creator answers on its new pc.
-    let resetting = false;
-    const hardReset = async ({ notifyPeer = true } = {}) => {
-      if (cancelled || !callIdRef.current || resetting) return;
-      resetting = true;
-      // 1. Tell creator to also tear down — gives them a head start
-      //    so their new pc exists by the time our offer arrives.
-      //    Skipped when WE're resetting because the creator asked us
-      //    to (they're already in their own reset).
-      if (notifyPeer) {
-        socket.emit('rtc:refresh', { callId: callIdRef.current });
-      }
-
-      // 2. Close the old pc on our side. Wrap in try/catch in case
-      //    it's already in a closed/failed state.
-      try { pcRef.current?.close(); } catch {}
-      pcRef.current = null;
-      offerSent = false;
-      calleeReady = false;
-      // calleeAccepted stays true — we're not re-inviting, just
-      // redoing the rtc layer for an in-progress call.
-
-      // 3. Fresh getUserMedia. We don't replaceTrack because the
-      //    sender list is on the dead pc; we'll add the tracks to
-      //    the new pc below.
-      try {
-        const fresh = await getLocalStream({ video: callType === 'video' });
-        if (cancelled) {
-          fresh.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        localStreamRef.current?.getTracks().forEach((t) => {
-          try { t.stop(); } catch {}
-        });
-        localStreamRef.current = fresh;
-        if (localVideo.current) localVideo.current.srcObject = fresh;
-        attachTrackWatchers(fresh);
-      } catch {
-        return;
-      }
-
-      // 4. Wait briefly so the creator can finish their teardown +
-      //    fresh-pc creation before our offer arrives. 300ms
-      //    handles a typical mobile getUserMedia round-trip.
-      await new Promise((r) => setTimeout(r, 300));
-      if (cancelled) return;
-
-      // 5. Spin up a brand-new pc and re-wire signaling.
-      try {
-        const ice = await fetchIceConfig();
-        const pc = createPeer(ice.iceServers);
-        pcRef.current = pc;
-        const stream = localStreamRef.current;
-        if (!stream) return;
-        stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-        pc.ontrack = (e) => {
-          if (remoteVideo.current) remoteVideo.current.srcObject = e.streams[0];
-        };
-        pc.onicecandidate = (e) => {
-          if (e.candidate && callIdRef.current) {
-            socket.emit('rtc:ice', { callId: callIdRef.current, candidate: e.candidate });
-          }
-        };
-        // 6. New offer (not iceRestart — this is a fresh pc).
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit('rtc:offer', { callId: callIdRef.current, sdp: offer });
-        tuneSenders(pc).catch(() => {});
-      } catch {
-        /* fetchIceConfig / createOffer can fail transiently; user
-           can press refresh again */
-      } finally {
-        resetting = false;
-      }
-    };
-
-    // Local refresh button → notify the peer + run hardReset.
-    refreshRef.current = () => hardReset({ notifyPeer: true });
-
-    const cleanup = () => {
-      pcRef.current?.close();
-      pcRef.current = null;
-      localStreamRef.current?.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
-      for (const { cleanup } of spectatorPcs.values()) cleanup();
-      spectatorPcs.clear();
     };
 
-    const trySendOffer = async () => {
-      if (offerSent) return;
-      if (!calleeAccepted || !calleeReady) return;
-      if (!pcRef.current || !callIdRef.current) return;
-      offerSent = true;
-      const offer = await pcRef.current.createOffer();
-      await pcRef.current.setLocalDescription(offer);
-      socket.emit('rtc:offer', { callId: callIdRef.current, sdp: offer });
-      tuneSenders(pcRef.current).catch(() => {});
-    };
-
-    const start = async () => {
+    // Join the Zego room + publish our camera/mic. Called once the
+    // server confirms `call:accepted`. Zego internally handles ICE,
+    // transport, reconnect, and bitrate adaptation — none of which
+    // we have to plumb ourselves anymore. The remote stream lands in
+    // `onRemoteStream` and we wire it to the remote <video>.
+    const joinMedia = async () => {
+      if (cancelled || !callIdRef.current) return;
+      const me = useAuthStore.getState().user;
+      if (!me?._id) return;
       try {
-        const ice = await fetchIceConfig();
-        const stream = await getLocalStream({ video: callType === 'video' });
+        const session = await joinAndPublish({
+          callId: callIdRef.current,
+          userId: me._id,
+          callType,
+          onRemoteStream: (stream) => {
+            if (remoteVideo.current) remoteVideo.current.srcObject = stream;
+            setStatus('connected');
+          },
+          onRoomState: (reason) => {
+            if (reason === 'KICKOUT' || reason === 'TOKEN_EXPIRED') {
+              setError('Connection lost.');
+            }
+          },
+        });
         if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
+          await session.leave();
           return;
         }
-        localStreamRef.current = stream;
-        if (localVideo.current) localVideo.current.srcObject = stream;
-        attachTrackWatchers(stream);
+        zegoSession = session;
+        localStreamRef.current = session.localStream;
+        if (localVideo.current) localVideo.current.srcObject = session.localStream;
+      } catch (err) {
+        setError(err.message || 'Failed to join call');
+      }
+    };
 
-        const pc = createPeer(ice.iceServers);
-        pcRef.current = pc;
-        stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-        pc.ontrack = (e) => {
-          if (remoteVideo.current) remoteVideo.current.srcObject = e.streams[0];
-        };
-        pc.onicecandidate = (e) => {
-          if (e.candidate && callIdRef.current) {
-            socket.emit('rtc:ice', { callId: callIdRef.current, candidate: e.candidate });
-          }
-        };
+    // Refresh button — re-publish the local stream without leaving
+    // the room. Covers the "camera stuck" cases that used to require
+    // a full ICE-restart with our hand-rolled WebRTC; Zego handles
+    // the rest.
+    refreshRef.current = async () => {
+      if (!zegoSession || !callIdRef.current) return;
+      const me = useAuthStore.getState().user;
+      if (!me?._id) return;
+      try {
+        const fresh = await republishLocalMedia({
+          callId: callIdRef.current,
+          userId: me._id,
+          callType,
+          oldStream: zegoSession.localStream,
+          oldStreamId: zegoSession.streamId,
+        });
+        zegoSession.localStream = fresh.localStream;
+        zegoSession.streamId = fresh.streamId;
+        localStreamRef.current = fresh.localStream;
+        if (localVideo.current) localVideo.current.srcObject = fresh.localStream;
+      } catch {
+        /* user can hit refresh again */
+      }
+    };
 
-        socket.emit('call:invite', { toUserId: peerId, packageId: packageId || undefined, callType }, (ack) => {
+    const start = () => {
+      socket.emit(
+        'call:invite',
+        { toUserId: peerId, packageId: packageId || undefined, callType },
+        (ack) => {
           if (ack?.code === 'INSUFFICIENT_CREDITS') {
-            setError(`Not enough credits — need ${ack.required}, you have ${ack.balance}.`);
+            setError(
+              `Not enough credits — need ${ack.required}, you have ${ack.balance}.`,
+            );
             setTimeout(() => nav(-1), 2500);
             return;
           }
@@ -264,47 +134,14 @@ export default function Call() {
           if (ack.perMinuteRate) setPerMinuteRate(ack.perMinuteRate);
           callIdRef.current = ack.callId;
           setStatus('ringing');
-        });
-      } catch (err) {
-        setError(err.message);
-      }
+        },
+      );
     };
 
     socket.on('call:accepted', ({ callId }) => {
       if (callId !== callIdRef.current) return;
-      calleeAccepted = true;
       setStatus('connecting');
-      trySendOffer();
-    });
-
-    socket.on('rtc:ready', ({ callId }) => {
-      if (callId !== callIdRef.current) return;
-      calleeReady = true;
-      trySendOffer();
-    });
-
-    socket.on('rtc:answer', async ({ callId, sdp }) => {
-      if (callId !== callIdRef.current) return;
-      await pcRef.current?.setRemoteDescription(sdp);
-      setStatus('connected');
-    });
-
-    socket.on('rtc:ice', async ({ callId, candidate }) => {
-      if (callId !== callIdRef.current) return;
-      try { await pcRef.current.addIceCandidate(candidate); } catch {}
-    });
-
-    // Creator hit Refresh — they want a fresh connection. We do the
-    // hard reset from this side so we can send the new offer. NOTE:
-    // when WE press refresh locally, hardReset emits rtc:refresh
-    // which echoes back to us via socket.io broadcast semantics IF
-    // the server were to fan it; the server does `socket.to(room)`
-    // (skips sender) so we don't get our own emit, and this handler
-    // only fires for the OTHER peer's refresh.
-    socket.on('rtc:refresh', ({ callId }) => {
-      if (callId !== callIdRef.current) return;
-      // Creator asked us to reset → don't echo rtc:refresh back.
-      hardReset({ notifyPeer: false });
+      joinMedia();
     });
 
     socket.on('call:billed', ({ callId, totalBilled, walletBalance }) => {
@@ -314,9 +151,6 @@ export default function Call() {
       if (me) useAuthStore.getState().setUser({ ...me, walletBalance });
     });
 
-    // Call ended from either side → tear down WebRTC, show the ended
-    // pill briefly, then go to home. Always nav to '/' (not back) so we
-    // never accidentally close the tab when the call was the entry point.
     socket.on('call:rejected', () => {
       setStatus('rejected');
       cleanup();
@@ -328,50 +162,15 @@ export default function Call() {
       setTimeout(() => nav('/', { replace: true }), 1200);
     });
 
-    // Admin moderation: when an admin asks to spectate, push our outgoing
-    // tracks to them via a fresh send-only peer connection. If the same
-    // admin is reconnecting (left and came back), close the stale PC first
-    // — otherwise the new admin tab never receives an offer.
-    const onAdminJoin = async ({ callId: id, adminId }) => {
-      if (id !== callIdRef.current) return;
-      const existing = spectatorPcs.get(adminId);
-      if (existing) {
-        existing.cleanup();
-        spectatorPcs.delete(adminId);
-      }
-      const stream = localStreamRef.current;
-      if (!stream) return;
-      try {
-        const ice = await fetchIceConfig();
-        const handle = await openSpectatorPc({
-          iceServers: ice.iceServers,
-          localStream: stream,
-          socket,
-          callId: id,
-          adminId,
-        });
-        spectatorPcs.set(adminId, handle);
-      } catch (e) { /* non-fatal */ }
-    };
-    socket.on('admin:spectator-arrived', onAdminJoin);
-
     start();
 
     return () => {
       cancelled = true;
       socket.off('call:accepted');
-      socket.off('rtc:ready');
-      socket.off('rtc:answer');
-      socket.off('rtc:ice');
       socket.off('call:billed');
       socket.off('call:rejected');
       socket.off('call:ended');
-      socket.off('rtc:refresh');
       refreshRef.current = null;
-      socket.off('admin:spectator-arrived', onAdminJoin);
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('pageshow', onVisibility);
-      window.removeEventListener('focus', onVisibility);
       if (callIdRef.current) socket.emit('call:hangup', { callId: callIdRef.current });
       cleanup();
       exitFullscreen();

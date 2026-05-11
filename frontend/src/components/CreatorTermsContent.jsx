@@ -127,7 +127,25 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={8} title="Platform Moderation & Safety">
+      <Section n={8} title="Face & Identity Disclosure Is Voluntary">
+        <p>
+          CallNade never requires you to show your face, body, or any
+          identifiable feature on camera. How much of your appearance you reveal
+          on calls, photos, or videos is entirely your choice — the platform
+          will not instruct, pressure, or condition any feature on you removing
+          a mask, blur, costume, or filter.
+        </p>
+        <List
+          items={[
+            'You may use voice-only audio packages, blurred or partial video, masks, costume, framing, or lighting to protect your visual identity at any time.',
+            'CallNade staff and automated systems will never ask you to "show your face", "turn the camera fully on", or otherwise expose identifiable features as a condition of using the platform or being paid.',
+            'If a user attempts to threaten, blackmail, dox, harass, or coerce you over showing or not showing your face or identity, stop the interaction immediately and report it to info@callnade.site. Such conduct is grounds for permanent ban of the offending user.',
+            'CallNade accepts no responsibility for exploitation, harassment, or misuse arising from voluntary disclosure of your face, voice, or identity to viewers — protecting your privacy in what you choose to display is your own decision.',
+          ]}
+        />
+      </Section>
+
+      <Section n={9} title="Platform Moderation & Safety">
         <List
           items={[
             'CallNade may review reports, sample-record, spectate, or otherwise moderate calls and chats for safety, abuse investigation, fraud control, and legal compliance.',
@@ -138,7 +156,7 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={9} title="Earnings, Fees & Payouts">
+      <Section n={10} title="Earnings, Fees & Payouts">
         <List
           items={[
             'You may earn credits through paid calls, gifts, and other monetised interactions on the platform.',
@@ -152,7 +170,7 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={10} title="Refunds, Chargebacks & Clawbacks">
+      <Section n={11} title="Refunds, Chargebacks & Clawbacks">
         <List
           items={[
             'If a user successfully disputes or charges back a payment that funded earnings already credited to you, CallNade may debit (claw back) the corresponding amount from your earnings wallet, referral wallet, or pending payouts.',
@@ -162,7 +180,7 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={11} title="Referral Program">
+      <Section n={12} title="Referral Program">
         <List
           items={[
             'Creators may participate in CallNade’s referral program. Current terms: a creator who joins via your code generates 10% of their per-call earnings as a bonus to your referral wallet, for 30 days from the referred creator’s signup.',
@@ -173,7 +191,7 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={12} title="Suspension, Forfeiture & Termination">
+      <Section n={13} title="Suspension, Forfeiture & Termination">
         <p>CallNade may suspend, restrict, freeze payouts, or permanently terminate a creator account for reasons including but not limited to:</p>
         <List
           items={[
@@ -193,7 +211,7 @@ export default function CreatorTermsContent() {
         </p>
       </Section>
 
-      <Section n={13} title="Intellectual Property & License">
+      <Section n={14} title="Intellectual Property & License">
         <p>
           You retain ownership of original content you create and upload. By uploading content to
           CallNade you grant the platform a non-exclusive, worldwide, royalty-free licence to host,
@@ -207,7 +225,7 @@ export default function CreatorTermsContent() {
         </p>
       </Section>
 
-      <Section n={14} title="Indemnification">
+      <Section n={15} title="Indemnification">
         <p>
           You agree to indemnify, defend, and hold harmless CallNade, its directors, officers,
           employees, and contractors from any claim, demand, loss, liability, or expense
@@ -223,7 +241,7 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={15} title="Limitation of Liability">
+      <Section n={16} title="Limitation of Liability">
         <p>
           CallNade is a technology platform that enables interactions between users and creators.
           To the maximum extent permitted by law, CallNade is not responsible for:
@@ -244,7 +262,7 @@ export default function CreatorTermsContent() {
         </p>
       </Section>
 
-      <Section n={16} title="Compliance With Laws">
+      <Section n={17} title="Compliance With Laws">
         <List
           items={[
             'You are responsible for ensuring your activity complies with all applicable local, national, and international laws — including tax, consumer protection, content regulation, and data-protection laws.',
@@ -254,7 +272,7 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={17} title="DMCA / IP Takedown">
+      <Section n={18} title="DMCA / IP Takedown">
         <p>
           If you believe content on CallNade infringes your intellectual property rights, write to
           <b> info@callnade.site </b> with: a description of the work, the URL of the infringing
@@ -264,7 +282,7 @@ export default function CreatorTermsContent() {
         </p>
       </Section>
 
-      <Section n={18} title="Service Availability">
+      <Section n={19} title="Service Availability">
         <List
           items={[
             'CallNade is provided "as is" without uptime guarantees. Maintenance, outages, and connectivity issues may interrupt the service.',
@@ -274,7 +292,7 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={19} title="Modifications">
+      <Section n={20} title="Modifications">
         <p>
           CallNade may update these terms from time to time. Material changes will be communicated
           via the email or phone number on file at least seven (7) days before they take effect
@@ -283,7 +301,7 @@ export default function CreatorTermsContent() {
         </p>
       </Section>
 
-      <Section n={20} title="Governing Law & Dispute Resolution">
+      <Section n={21} title="Governing Law & Dispute Resolution">
         <List
           items={[
             'These terms are governed by the laws of the Republic of India.',
@@ -294,18 +312,18 @@ export default function CreatorTermsContent() {
         />
       </Section>
 
-      <Section n={21} title="Notice, Assignment, Severability">
+      <Section n={22} title="Notice, Assignment, Severability">
         <List
           items={[
             'Notices to you may be sent to the email address or phone number on your account; notices to CallNade must go to info@callnade.site.',
             'You may not assign or transfer these terms or your account. CallNade may assign its rights and obligations to a successor entity without your consent.',
             'If any provision is found unenforceable, the remainder of these terms remains in full force.',
-            'Sections 4–18 (and any clause that by its nature should survive) survive termination of your account.',
+            'Sections 4–19 (and any clause that by its nature should survive) survive termination of your account.',
           ]}
         />
       </Section>
 
-      <Section n={22} title="Acceptance">
+      <Section n={23} title="Acceptance">
         <p>By registering as a creator on CallNade, you confirm that:</p>
         <List
           items={[

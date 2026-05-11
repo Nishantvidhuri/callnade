@@ -17,10 +17,19 @@ let socket = null;
 function socketUrl() {
   const explicit = import.meta.env.VITE_SOCKET_URL;
   if (explicit) return explicit;
-  // In dev default to the backend on :4000 same-machine. In prod
-  // (`import.meta.env.DEV === false`) use the same origin so nginx
-  // proxies the upgrade.
-  return import.meta.env.DEV ? 'http://localhost:4000' : undefined;
+  if (!import.meta.env.DEV) return undefined; // prod → nginx proxy
+
+  // Dev: only bypass the Vite proxy when the page itself is on
+  // localhost. If it's coming through an ngrok / Cloudflare tunnel
+  // (so the mobile device can reach it), fall back to the
+  // same-origin path so the tunnel forwards `/socket.io` via Vite's
+  // ws-proxy. The mobile phone has no localhost:4000 to hit.
+  const host =
+    typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return 'http://localhost:4000';
+  }
+  return undefined;
 }
 
 export function getSocket() {

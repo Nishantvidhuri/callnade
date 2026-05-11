@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "callnade",
+    "slug": "callnade",
+    "scheme": "callnade",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": ["ios", "android"],
+    "plugins": [
+      "expo-screen-capture"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "site.callnade.app"
+    },
+    "android": {
+      "package": "site.callnade.app",
+      "permissions": ["CAMERA", "RECORD_AUDIO", "INTERNET"]
+    },
+    "extra": {
+      "apiBaseUrl": "https://callnade.site/api/v1"
+    }
+  }
+}

@@ -37,6 +37,13 @@ const schema = z.object({
   // exposed to the frontend as VITE_GOOGLE_CLIENT_ID), no secret
   // needed for the ID-token verification flow we're using.
   GOOGLE_CLIENT_ID: z.string().default(''),
+
+  // ZegoCloud RTC. App ID is public (frontend reads it via
+  // VITE_ZEGO_APP_ID); Server Secret is used to mint per-user
+  // tokens via token04 and MUST stay backend-only.
+  ZEGO_APP_ID: z.coerce.number().default(0),
+  ZEGO_SERVER_SECRET: z.string().default(''),
+  ZEGO_TOKEN_TTL_SEC: z.coerce.number().default(3 * 60 * 60), // 3h, longer than any call
 });
 
 const parsed = schema.safeParse(process.env);

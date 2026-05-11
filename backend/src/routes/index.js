@@ -10,6 +10,7 @@ import { router as adminRouter } from './admin.routes.js';
 import { router as packageRouter } from './package.routes.js';
 import { router as visitRouter } from './visit.routes.js';
 import { router as walletRouter } from './wallet.routes.js';
+import { router as zegoRouter } from './zego.routes.js';
 
 export const router = Router();
 
@@ -24,3 +25,4 @@ router.use('/admin', adminRouter);
 router.use('/packages', packageRouter);
 router.use('/visits', visitRouter);
 router.use('/wallet', walletRouter);
+router.use('/zego', zegoRouter);
