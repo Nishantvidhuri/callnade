@@ -5,7 +5,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { getSocket } from '../services/socket.js';
-import { joinAndPublish, republishLocalMedia } from '../services/zego.js';
+import { joinAndPublish, republishLocalMedia } from '../services/agora.js';
 import { exitFullscreen } from '../utils/fullscreen.js';
 import { useAuthStore } from '../stores/auth.store.js';
 
@@ -68,10 +68,13 @@ export default function Call() {
           callId: callIdRef.current,
           userId: me._id,
           callType,
-          onRemoteStream: (stream) => {
-            if (remoteVideo.current) remoteVideo.current.srcObject = stream;
-            setStatus('connected');
-          },
+          // Agora drives both renders directly into our <video> tags
+          // — we deliberately don't set srcObject ourselves because
+          // the Agora pipeline doesn't reliably feed a sibling
+          // MediaStream consumer (local tile was rendering black).
+          playLocalInto: localVideo.current || undefined,
+          playRemoteInto: remoteVideo.current || undefined,
+          onRemoteStream: () => setStatus('connected'),
           onRoomState: (reason) => {
             if (reason === 'KICKOUT' || reason === 'TOKEN_EXPIRED') {
               setError('Connection lost.');
@@ -84,7 +87,6 @@ export default function Call() {
         }
         zegoSession = session;
         localStreamRef.current = session.localStream;
-        if (localVideo.current) localVideo.current.srcObject = session.localStream;
       } catch (err) {
         setError(err.message || 'Failed to join call');
       }
@@ -105,11 +107,11 @@ export default function Call() {
           callType,
           oldStream: zegoSession.localStream,
           oldStreamId: zegoSession.streamId,
+          playLocalInto: localVideo.current || undefined,
         });
         zegoSession.localStream = fresh.localStream;
         zegoSession.streamId = fresh.streamId;
         localStreamRef.current = fresh.localStream;
-        if (localVideo.current) localVideo.current.srcObject = fresh.localStream;
       } catch {
         /* user can hit refresh again */
       }
@@ -419,30 +421,42 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
               }`}
             />
 
-            {showLocalAsHero ? (
-              // Pre-connect hero — full-screen self preview while ringing.
-              <video
-                ref={localVideo}
-                autoPlay
-                playsInline
-                muted
-                className="absolute inset-0 w-full h-full object-cover bg-neutral-900"
-              />
-            ) : (
-              // Connected — local moves to a corner PIP.
+            {/* Local video — ONE element that animates between
+                full-screen hero (pre-connect) and corner PIP
+                (connected). Keeping the element stable means the
+                Agora cam pipeline (which is attached on join) stays
+                rendering through the layout switch — swapping into
+                a freshly-mounted <video> on status change was what
+                left the PIP black after connect. */}
+            <video
+              ref={localVideo}
+              autoPlay
+              playsInline
+              muted
+              className={`absolute object-cover transition-all duration-300 bg-neutral-900 ${
+                showLocalAsHero
+                  ? 'inset-0 w-full h-full'
+                  : `w-20 sm:w-32 lg:w-40 aspect-[3/4] right-3 sm:right-5 rounded-2xl border-2 border-white/40 shadow-xl ${
+                      cameraOff ? 'opacity-0' : 'opacity-100'
+                    }`
+              }`}
+              style={
+                showLocalAsHero
+                  ? undefined
+                  : { bottom: 'calc(max(env(safe-area-inset-bottom), 24px) + 96px)' }
+              }
+            />
+
+            {/* PIP overlay wrapper — sits exactly on top of the
+                docked video. Pointer-events-none so it doesn't
+                steal taps from the controls below. */}
+            {!showLocalAsHero && (
               <div
-                className="absolute right-3 sm:right-5 w-20 sm:w-32 lg:w-40 aspect-[3/4] rounded-2xl overflow-hidden border-2 border-white/40 shadow-xl bg-neutral-800"
+                className="absolute w-20 sm:w-32 lg:w-40 aspect-[3/4] right-3 sm:right-5 rounded-2xl overflow-hidden pointer-events-none"
                 style={{ bottom: 'calc(max(env(safe-area-inset-bottom), 24px) + 96px)' }}
               >
-                <video
-                  ref={localVideo}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover transition ${cameraOff ? 'opacity-0' : 'opacity-100'}`}
-                />
                 {cameraOff && (
-                  <div className="absolute inset-0 grid place-items-center text-white/70">
+                  <div className="absolute inset-0 grid place-items-center text-white/70 bg-neutral-800">
                     <VideoOff size={18} />
                   </div>
                 )}

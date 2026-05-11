@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getSocket } from '../services/socket.js';
-import { joinAndPublish, republishLocalMedia } from '../services/zego.js';
+import { joinAndPublish, republishLocalMedia } from '../services/agora.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { exitFullscreen } from '../utils/fullscreen.js';
 import { CallShell } from './Call.jsx';
@@ -53,10 +53,9 @@ export default function IncomingCall() {
           callId,
           userId: me._id,
           callType,
-          onRemoteStream: (stream) => {
-            if (remoteVideo.current) remoteVideo.current.srcObject = stream;
-            setStatus('connected');
-          },
+          playLocalInto: localVideo.current || undefined,
+          playRemoteInto: remoteVideo.current || undefined,
+          onRemoteStream: () => setStatus('connected'),
           onRoomState: (reason) => {
             if (reason === 'KICKOUT' || reason === 'TOKEN_EXPIRED') {
               setError('Connection lost.');
@@ -69,7 +68,6 @@ export default function IncomingCall() {
         }
         zegoSession = session;
         localStreamRef.current = session.localStream;
-        if (localVideo.current) localVideo.current.srcObject = session.localStream;
       } catch (err) {
         setError(err.message || 'Failed to join call');
       }
@@ -86,11 +84,11 @@ export default function IncomingCall() {
           callType,
           oldStream: zegoSession.localStream,
           oldStreamId: zegoSession.streamId,
+          playLocalInto: localVideo.current || undefined,
         });
         zegoSession.localStream = fresh.localStream;
         zegoSession.streamId = fresh.streamId;
         localStreamRef.current = fresh.localStream;
-        if (localVideo.current) localVideo.current.srcObject = fresh.localStream;
       } catch {
         /* user can hit refresh again */
       }

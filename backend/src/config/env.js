@@ -44,6 +44,15 @@ const schema = z.object({
   ZEGO_APP_ID: z.coerce.number().default(0),
   ZEGO_SERVER_SECRET: z.string().default(''),
   ZEGO_TOKEN_TTL_SEC: z.coerce.number().default(3 * 60 * 60), // 3h, longer than any call
+
+  // Agora RTC. App ID is public (the frontend embeds it via
+  // VITE_AGORA_APP_ID). The App Certificate signs RTC tokens and
+  // must stay backend-only. New /agora-test sandbox route uses
+  // these; once we cut over for real calls we'll just keep using
+  // the same envs.
+  AGORA_APP_ID: z.string().default(''),
+  AGORA_APP_CERT: z.string().default(''),
+  AGORA_TOKEN_TTL_SEC: z.coerce.number().default(3 * 60 * 60), // 3h
 });
 
 const parsed = schema.safeParse(process.env);
