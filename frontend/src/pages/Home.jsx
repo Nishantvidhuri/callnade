@@ -232,23 +232,22 @@ export default function Home() {
               />
             ) : (
               <>
-                {/* 18+ tabs disabled for now — keep <DiscoverTabs/> + the
-                    AdultGateModal mount commented so we can re-enable later
-                    without redoing the wiring. adultMode stays false, so all
-                    queries hit the regular Discover bucket. */}
-                {/*
+                {/* Two-section split: regular ("Discover") creators
+                    vs 18+ creators. Switching to 18+ pops the
+                    AdultGateModal first; only after confirm does
+                    adultMode flip and the popular/online queries
+                    re-fire with `adult=true`. */}
                 <DiscoverTabs
                   adultMode={adultMode}
                   onSwitch={(next) => {
                     if (next === adultMode) return;
                     if (next === true) {
-                      setAdultPending(true);     // open the gate modal
+                      setAdultPending(true); // open the age-confirm gate
                     } else {
                       setAdultMode(false);
                     }
                   }}
                 />
-                */}
 
                 {onlineItems.length > 0 && (
                   <section className="mb-8">
@@ -291,8 +290,11 @@ export default function Home() {
           Logged-in users skip it (already accepted at signup). */}
       {!me && <AgeGateModal />}
 
-      {/* 18+ gate modal — disabled along with the DiscoverTabs above. */}
-      {/*
+      {/* 18+ gate modal — pops the moment someone taps the 18+ tab.
+          Confirming flips adultMode, which re-fires the discover
+          queries with `adult=true`. Cancelling stays on the regular
+          tab. No localStorage cookie — we want explicit confirmation
+          every time the user opens the adult bucket fresh. */}
       <AdultGateModal
         open={adultPending}
         onConfirm={() => {
@@ -301,7 +303,6 @@ export default function Home() {
         }}
         onCancel={() => setAdultPending(false)}
       />
-      */}
     </div>
   );
 }

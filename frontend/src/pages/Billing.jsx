@@ -614,7 +614,7 @@ function ActionModal({ mode, balance, onClose, onSuccess, user }) {
 
         <div className="px-5 py-4">
           {isAdd ? (
-            <AddCreditsForm balance={balance} onClose={onClose} onSuccess={onSuccess} user={user} />
+            <AddCreditsDispatcher balance={balance} onClose={onClose} onSuccess={onSuccess} user={user} />
           ) : (
             <WithdrawForm
               balance={balance}
@@ -631,6 +631,273 @@ function ActionModal({ mode, balance, onClose, onSuccess, user }) {
 }
 
 /**
+ * Lazy-load the Razorpay Checkout script the first time someone
+ * actually pays. Caches the promise so subsequent payments skip the
+ * network hit. Resolves once `window.Razorpay` is callable.
+ */
+function loadRazorpayCheckout() {
+  if (typeof window === 'undefined') return Promise.reject(new Error('SSR'));
+  if (window.__rzpScriptPromise) return window.__rzpScriptPromise;
+  window.__rzpScriptPromise = new Promise((resolve, reject) => {
+    if (window.Razorpay) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load Razorpay checkout'));
+    document.body.appendChild(s);
+  });
+  return window.__rzpScriptPromise;
+}
+
+/**
+ * Tabbed wrapper for the Add-credits modal. Lets the user pick
+ * between the instant Razorpay checkout (default) and the manual
+ * QR + reference flow (admin-mediated). Both paths share the same
+ * surrounding modal chrome — only the body switches.
+ */
+function AddCreditsDispatcher({ balance, onClose, onSuccess, user }) {
+  // null while we load /wallet/payment-config; bool after.
+  const [razorpayEnabled, setRazorpayEnabled] = useState(null);
+  // tab is 'razorpay' | 'manual'; once we know the config it's
+  // clamped to 'manual' when Razorpay is off.
+  const [tab, setTab] = useState('razorpay');
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get('/wallet/payment-config')
+      .then((r) => {
+        if (cancelled) return;
+        const enabled = r.data?.razorpayEnabled !== false; // default ON
+        setRazorpayEnabled(enabled);
+        if (!enabled) setTab('manual');
+      })
+      .catch(() => {
+        // Config fetch failed — fail-open to manual so the user can
+        // still top up. They won't see the Razorpay tab until config
+        // succeeds.
+        if (!cancelled) {
+          setRazorpayEnabled(false);
+          setTab('manual');
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Loading state: render a small spinner so we don't briefly show
+  // the Razorpay tab and then yank it away.
+  if (razorpayEnabled === null) {
+    return (
+      <div className="py-10 grid place-items-center">
+        <span className="w-7 h-7 rounded-full border-4 border-brand-200 border-t-brand-500 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Tab pill — only rendered when both options are available.
+          With Razorpay off there's only one path (manual), so we
+          skip the pill entirely. */}
+      {razorpayEnabled && (
+        <div className="inline-flex w-full p-1 rounded-full bg-neutral-100 border border-neutral-200">
+          <button
+            type="button"
+            onClick={() => setTab('razorpay')}
+            className={`flex-1 px-3 py-1.5 text-xs font-bold rounded-full transition ${
+              tab === 'razorpay'
+                ? 'bg-tinder text-white shadow-sm'
+                : 'text-neutral-500 hover:text-ink'
+            }`}
+          >
+            Instant · Razorpay
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('manual')}
+            className={`flex-1 px-3 py-1.5 text-xs font-bold rounded-full transition ${
+              tab === 'manual'
+                ? 'bg-white text-ink shadow-sm'
+                : 'text-neutral-500 hover:text-ink'
+            }`}
+          >
+            QR + Reference
+          </button>
+        </div>
+      )}
+
+      {razorpayEnabled && tab === 'razorpay' ? (
+        <AddCreditsRazorpayForm
+          balance={balance}
+          onClose={onClose}
+          onSuccess={onSuccess}
+          user={user}
+        />
+      ) : (
+        <AddCreditsForm
+          balance={balance}
+          onClose={onClose}
+          onSuccess={onSuccess}
+          user={user}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Razorpay Checkout top-up flow:
+ *   1. POST /wallet/order { amount }    → backend creates a Razorpay
+ *      order + pending WalletRequest, returns the orderId / keyId.
+ *   2. Load Razorpay's checkout.js + open its modal.
+ *   3. On `handler(response)` Razorpay returns the signed payment
+ *      payload; we POST /wallet/verify which HMAC-checks the
+ *      signature and credits the wallet atomically.
+ *   4. Refresh /users/me so the wallet pill updates immediately.
+ *
+ * Failure-mode handling: if /wallet/order fails (e.g. server returns
+ * "Razorpay is not configured on this server"), we surface the
+ * message and let the user fall back to the manual tab.
+ */
+function AddCreditsRazorpayForm({ balance, onClose, onSuccess, user }) {
+  const [amount, setAmount] = useState(100);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+  const num = Number(amount) || 0;
+  const canSubmit = num >= 1 && !submitting && !done;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (num < 1) return setError('Enter at least 1 credit');
+    setSubmitting(true);
+    try {
+      // 1) Create the order server-side. Backend returns paise amount
+      //    + Razorpay orderId + the public keyId for the checkout.
+      const { data: order } = await api.post('/wallet/order', { amount: num });
+
+      // 2) Lazy-load checkout.js (idempotent across re-opens).
+      await loadRazorpayCheckout();
+
+      // 3) Open Razorpay's hosted checkout. The `handler` callback is
+      //    invoked once the user completes payment — the response
+      //    carries the signed fields we need to verify.
+      const rzp = new window.Razorpay({
+        key: order.keyId,
+        order_id: order.orderId,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'callnade',
+        description: `Top up ${num} credits`,
+        prefill: {
+          email: user?.email || undefined,
+          name: user?.displayName || user?.username || undefined,
+          contact: user?.phone || undefined,
+        },
+        theme: { color: '#ec4899' },
+        handler: async (response) => {
+          try {
+            const { data: verified } = await api.post('/wallet/verify', {
+              walletRequestId: order.walletRequestId,
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            });
+            // 4) Refresh balance in the auth store so the wallet
+            //    pill picks up the new value without a full reload.
+            //    /users/me returns `{ user, avatar, gallery }` — the
+            //    inner `.user` is what setUser expects; passing the
+            //    whole envelope nukes username/displayName and
+            //    crashes HomeSidebar.
+            try {
+              const { data } = await api.get('/users/me');
+              const fresh = data?.user || data;
+              const current = useAuthStore.getState().user;
+              useAuthStore.getState().setUser({ ...current, ...fresh });
+            } catch { /* non-fatal */ }
+            setDone(true);
+            onSuccess?.(verified);
+            setTimeout(() => onClose?.(), 1100);
+          } catch (err) {
+            setError(err.message || 'Payment verification failed');
+            setSubmitting(false);
+          }
+        },
+        modal: {
+          ondismiss: () => setSubmitting(false),
+        },
+      });
+      rzp.open();
+    } catch (err) {
+      setError(err.message || 'Could not open Razorpay');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div className="rounded-2xl bg-brand-50 border border-brand-100 p-4 text-[12px] text-brand-700">
+        Pay instantly via Razorpay — UPI, cards, wallets, net banking. Your
+        wallet is credited the moment payment clears.
+      </div>
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-xs font-bold uppercase tracking-wide text-neutral-700">
+          Amount (credits)
+        </span>
+        <input
+          type="number"
+          min={1}
+          step={1}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          disabled={submitting || done}
+          className="px-4 py-2.5 text-sm rounded-2xl border border-neutral-300 focus:outline-none focus:border-ink focus:ring-2 focus:ring-black/10 transition disabled:opacity-50"
+        />
+        <small className="text-[11px] text-neutral-500">
+          Current balance · {fmtCredits(balance)} credits
+        </small>
+      </label>
+
+      <div className="grid grid-cols-3 gap-2">
+        {[100, 500, 1000].map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setAmount(v)}
+            disabled={submitting || done}
+            className="px-3 py-2 text-sm font-semibold rounded-full border border-neutral-200 hover:border-tinder hover:text-tinder transition disabled:opacity-50"
+          >
+            ₹{v}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <div role="alert" className="px-3 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+      {done && (
+        <div className="px-3 py-2 rounded-2xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-700 inline-flex items-center gap-2">
+          <Check size={14} /> Payment received — wallet topped up.
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="w-full px-5 py-3 text-sm font-bold rounded-full text-white bg-tinder shadow-md shadow-tinder/30 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition"
+      >
+        {submitting ? 'Opening Razorpay…' : `Pay ₹${num || 0} via Razorpay`}
+      </button>
+    </form>
+  );
+}
+
+/**
  * Add-credits flow (manual reconciliation):
  *   1) Show the merchant QR (tap to zoom) + merchant UPI ID with a
  *      copy button.
@@ -641,9 +908,6 @@ function ActionModal({ mode, balance, onClose, onSuccess, user }) {
  *   4) Submit → POST /wallet/topup. The request lands as `pending`
  *      and an admin verifies the reference against the collection
  *      account before crediting the wallet.
- *
- * Razorpay's automated UPI Collect path is parked on the backend
- * (still imported, not called) so we can re-enable when ready.
  */
 function AddCreditsForm({ balance, onClose, onSuccess }) {
   const [amount, setAmount] = useState(100);

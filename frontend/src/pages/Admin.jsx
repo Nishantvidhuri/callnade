@@ -239,6 +239,7 @@ export default function Admin() {
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-24 lg:pb-8">
+          <RazorpayToggle />
           {error && (
             <div className="px-4 py-2.5 mb-4 bg-rose-50 border border-rose-100 text-rose-700 text-sm rounded-lg">
               {error}
@@ -598,3 +599,83 @@ function RoleChip({ role }) {
   );
 }
 
+
+/**
+ * Admin-controlled Razorpay enable / disable. When off, the user-side
+ * Add-credits modal hides the Razorpay tab and routes everyone to
+ * the manual QR + reference flow. Useful when Razorpay is mid-KYC,
+ * the gateway is misbehaving, or we just want to test the manual
+ * flow on production.
+ *
+ * Optimistic update — flips locally on click, reverts on error.
+ */
+function RazorpayToggle() {
+  const [enabled, setEnabled] = useState(null); // null = loading
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/admin/razorpay-enabled')
+      .then((r) => { if (!cancelled) setEnabled(r.data?.enabled !== false); })
+      .catch((e) => { if (!cancelled) setError(e.message || 'Failed to load Razorpay state'); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggle = async () => {
+    if (enabled === null || busy) return;
+    const next = !enabled;
+    setBusy(true);
+    setError(null);
+    setEnabled(next); // optimistic
+    try {
+      const { data } = await api.patch('/admin/razorpay-enabled', { enabled: next });
+      setEnabled(!!data?.enabled);
+    } catch (e) {
+      setEnabled(!next); // revert
+      setError(e.message || 'Failed to update Razorpay state');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (enabled === null) {
+    return (
+      <div className="mb-5 rounded-2xl bg-white border border-neutral-200 p-4 text-sm text-neutral-500">
+        Loading Razorpay status…
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-5 rounded-2xl bg-white border border-neutral-200 p-4 flex items-center justify-between gap-3 flex-wrap">
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">
+          Razorpay payments
+        </p>
+        <p className="text-sm font-semibold mt-0.5">
+          {enabled
+            ? 'Enabled — users see the Razorpay tab on Add credits.'
+            : 'Disabled — only the manual QR + reference flow is shown.'}
+        </p>
+        {error && <p className="text-xs text-rose-600 mt-1">{error}</p>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        onClick={toggle}
+        disabled={busy}
+        className={`relative w-12 h-6 rounded-full transition shrink-0 disabled:opacity-60 ${
+          enabled ? 'bg-tinder' : 'bg-neutral-300'
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition ${
+            enabled ? 'translate-x-6' : ''
+          }`}
+        />
+      </button>
+    </div>
+  );
+}

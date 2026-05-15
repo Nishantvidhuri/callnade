@@ -70,6 +70,11 @@ export default function Signup({ navigation }) {
       };
       const { data } = await api.post('/auth/signup', payload);
       useAuthStore.getState().setAuth(data);
+      try {
+        const me = await api.get('/users/me');
+        const userPayload = me?.data?.user || me?.data;
+        if (userPayload) useAuthStore.getState().setUser(userPayload);
+      } catch { /* non-fatal */ }
     } catch (err) {
       setError(err.message || 'Signup failed');
     } finally {

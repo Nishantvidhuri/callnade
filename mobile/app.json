@@ -6,9 +6,18 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "plugins": [
-      "expo-screen-capture"
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Allow callnade to use your camera for video calls.",
+          "microphonePermission": "Allow callnade to use your microphone for calls."
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": false,
@@ -16,10 +25,18 @@
     },
     "android": {
       "package": "site.callnade.app",
-      "permissions": ["CAMERA", "RECORD_AUDIO", "INTERNET"]
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "INTERNET"
+      ]
     },
     "extra": {
-      "apiBaseUrl": "https://callnade.site/api/v1"
-    }
+      "apiBaseUrl": "https://callnade.site/api/v1",
+      "eas": {
+        "projectId": "b969d535-4ade-48e4-b09d-dc5a460db797"
+      }
+    },
+    "owner": "nishantvidhuri"
   }
 }

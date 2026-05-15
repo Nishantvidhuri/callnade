@@ -94,10 +94,11 @@ export async function updateMe(userId, patch) {
       delete allowed.isActive;
     }
   }
-  // Coerce `isActive` to boolean — the patch comes from the request
-  // body so a stray string like "true" would otherwise bypass the
-  // discovery filter that compares to `true`.
+  // Coerce both flag fields to real booleans — the patch comes from
+  // the request body so a stray string like "true" would otherwise
+  // bypass discovery filters that compare to `true`.
   if ('isActive' in allowed) allowed.isActive = !!allowed.isActive;
+  if ('isAdult' in allowed) allowed.isAdult = !!allowed.isAdult;
   const user = await User.findByIdAndUpdate(userId, allowed, { new: true });
   await redis.del(profileKey(user.username));
   return user.toJSON();

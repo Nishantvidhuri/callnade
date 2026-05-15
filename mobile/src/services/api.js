@@ -1,5 +1,4 @@
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { useAuthStore } from '../stores/auth.store.js';
 
@@ -66,35 +65,6 @@ api.interceptors.response.use(
   },
 );
 
-/**
- * Persist the auth-store's accessToken across app launches. The web
- * relies on a refresh-token httpOnly cookie that the browser hands
- * back automatically; React Native has no such cookie jar so we
- * mirror the access token in AsyncStorage and re-hydrate on cold
- * start. (For a v1 this is OK — for production we'd ship a
- * refresh-token + secure-store variant.)
- */
-const ACCESS_KEY = 'callnade.accessToken';
-const USER_KEY = 'callnade.user';
-
-export async function persistAuth({ accessToken, user }) {
-  await Promise.all([
-    accessToken
-      ? AsyncStorage.setItem(ACCESS_KEY, accessToken)
-      : AsyncStorage.removeItem(ACCESS_KEY),
-    user
-      ? AsyncStorage.setItem(USER_KEY, JSON.stringify(user))
-      : AsyncStorage.removeItem(USER_KEY),
-  ]);
-}
-
-export async function loadAuth() {
-  const [token, userJson] = await Promise.all([
-    AsyncStorage.getItem(ACCESS_KEY),
-    AsyncStorage.getItem(USER_KEY),
-  ]);
-  return {
-    accessToken: token || null,
-    user: userJson ? JSON.parse(userJson) : null,
-  };
-}
+// AsyncStorage hydration helpers live in src/services/authStorage.js
+// so the auth store can import them without re-importing this file
+// (avoiding a circular dependency).

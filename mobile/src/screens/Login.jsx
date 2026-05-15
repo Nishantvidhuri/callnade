@@ -30,6 +30,14 @@ export default function Login({ navigation }) {
         password,
       });
       useAuthStore.getState().setAuth(data);
+      // Hydrate the full user (wallet / earnings / referral balances).
+      // /users/me returns { user, avatar, gallery } — unwrap so the
+      // store holds the user object itself.
+      try {
+        const me = await api.get('/users/me');
+        const userPayload = me?.data?.user || me?.data;
+        if (userPayload) useAuthStore.getState().setUser(userPayload);
+      } catch { /* non-fatal */ }
     } catch (err) {
       setError(err.message || 'Login failed');
     } finally {

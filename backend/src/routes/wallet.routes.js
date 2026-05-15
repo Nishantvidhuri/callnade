@@ -78,3 +78,14 @@ router.get('/referral-payouts', requireAuth, asyncHandler(wallet.myReferralPayou
 // Public-but-auth'd: returns one random active payment QR for the
 // topup page to display. Picks a fresh one on every page load.
 router.get('/payment-qr', requireAuth, asyncHandler(wallet.paymentQr));
+// Public-but-auth'd: returns the admin-controlled payment-config the
+// Add-credits modal needs to know which payment tabs to render
+// (currently just `razorpayEnabled`). Cheap — one Mongo read.
+router.get('/payment-config', requireAuth, asyncHandler(wallet.paymentConfig));
+
+// Razorpay webhook — Razorpay's dashboard hits this URL when a
+// payment is captured / fails. NO auth (Razorpay can't authenticate
+// as a user); HMAC signature verification inside the controller is
+// the gate. Raw body bytes are required for the signature to match
+// — preserved by app.js's express.json `verify` hook on req.rawBody.
+router.post('/razorpay/webhook', asyncHandler(wallet.razorpayWebhook));

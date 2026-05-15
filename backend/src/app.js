@@ -36,7 +36,19 @@ app.use(
   }),
 );
 app.use(compression());
-app.use(express.json({ limit: '1mb' }));
+app.use(
+  express.json({
+    limit: '1mb',
+    // Preserve the raw request body bytes so webhook handlers
+    // (Razorpay etc.) can verify HMAC signatures against the exact
+    // payload that was signed. Without this the parsed-then-re-
+    // serialised JSON would have different whitespace and the
+    // signature would never match.
+    verify: (req, _res, buf) => {
+      if (buf?.length) req.rawBody = buf.toString('utf8');
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(pinoHttp({ logger }));

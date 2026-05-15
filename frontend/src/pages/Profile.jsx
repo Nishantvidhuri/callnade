@@ -40,7 +40,7 @@ export default function Profile() {
   const [pkgManagerOpen, setPkgManagerOpen] = useState(false);
   // Inline-settings state — only used when viewing own profile (isMe).
   const [editing, setEditing] = useState(false);
-  const [settingsForm, setSettingsForm] = useState({ displayName: '', bio: '', isPrivate: true });
+  const [settingsForm, setSettingsForm] = useState({ displayName: '', bio: '', isPrivate: true, isAdult: false });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const fileInput = useRef();
@@ -70,6 +70,7 @@ export default function Profile() {
           displayName: data.user.displayName || '',
           bio: data.user.bio || '',
           isPrivate: !!data.user.isPrivate,
+          isAdult: !!data.user.isAdult,
         });
       }
     } catch (err) {
@@ -461,6 +462,44 @@ export default function Profile() {
                 className="w-full px-4 py-2.5 text-sm rounded-2xl bg-white border border-neutral-300 focus:outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 transition resize-none"
               />
             </label>
+
+            {/* 18+ toggle — creator-only. Decides which discover
+                bucket the creator's profile lands in on /. Off (the
+                default) keeps them in the regular Discover tab; on
+                moves them to the 18+ tab. Backend `updateMe` already
+                drops this field for non-providers, so even if the
+                toggle leaked into a regular user's UI the change
+                wouldn't take effect. */}
+            {profile.user.role === 'provider' && (
+              <div className="rounded-2xl bg-neutral-50 border border-neutral-200 p-4 flex items-center gap-3">
+                <span className="w-9 h-9 rounded-full bg-rose-100 grid place-items-center text-rose-600 shrink-0 text-[11px] font-bold">
+                  18+
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold">Adult content mode</p>
+                  <p className="text-xs text-neutral-500">
+                    {settingsForm.isAdult
+                      ? 'Your profile appears in the 18+ tab. Only viewers who confirm 18+ see you.'
+                      : 'Your profile appears in the regular Discover tab.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settingsForm.isAdult}
+                  onClick={() => setSettingsForm({ ...settingsForm, isAdult: !settingsForm.isAdult })}
+                  className={`relative w-11 h-6 rounded-full transition ${
+                    settingsForm.isAdult ? 'bg-rose-500' : 'bg-neutral-300'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition ${
+                      settingsForm.isAdult ? 'translate-x-5' : ''
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
 
             <div className="rounded-2xl bg-neutral-50 border border-neutral-200 p-4 flex items-center gap-3">
               <span className="w-9 h-9 rounded-full bg-brand-100 grid place-items-center text-brand-600 shrink-0">

@@ -10,6 +10,7 @@ import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { s3, S3_BUCKET, CDN_BASE_URL } from '../config/s3.js';
 import { badRequest, internal } from '../utils/HttpError.js';
+import { Setting, getSetting } from '../models/setting.model.js';
 
 const ALLOWED_QR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_QR_BYTES = 4 * 1024 * 1024; // 4MB — QR screenshots are small
@@ -1211,4 +1212,185 @@ export async function pollWalletRequestStatus(userId, walletRequestId) {
     walletRequestId: String(request._id),
     gatewayStatus: gwStatus,
   };
+}
+
+
+// ─── Razorpay webhook ──────────────────────────────────────────────
+//
+// Razorpay sends server-to-server webhooks for payment events. We
+// only act on `payment.captured` (the "money is ours" signal — for
+// the auto-capture mode our orders use, captured == authorised).
+//
+// Why bother when the browser-side `/wallet/verify` already credits
+// on success? Two failure modes that handler can't cover:
+//   1. User closes the modal before our `handler` callback runs.
+//      Razorpay still captures the payment server-side; without the
+//      webhook, the wallet never credits.
+//   2. Browser crashes / loses connection between Razorpay's success
+//      and our /verify call.
+//
+// The webhook is idempotent: if /verify already credited the request,
+// we early-return. Both paths converge on the same WalletRequest row.
+
+/**
+ * Verify the `x-razorpay-signature` header on a webhook callback.
+ * Razorpay signs with `HMAC_SHA256(rawBody, RAZORPAY_WEBHOOK_SECRET)`
+ * and base64-... no wait — Razorpay uses hex encoding for webhooks
+ * (different from the checkout signature which is also hex). See:
+ * https://razorpay.com/docs/webhooks/validate-test/#validate-the-webhook-signature
+ */
+export function verifyRazorpayWebhookSignature({ rawBody, signature }) {
+  if (!env.RAZORPAY_WEBHOOK_SECRET || !signature || !rawBody) return false;
+  const expected = crypto
+    .createHmac('sha256', env.RAZORPAY_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest('hex');
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(expected),
+      Buffer.from(signature),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Process an incoming Razorpay webhook. Verifies signature, finds
+ * the matching WalletRequest, credits on `payment.captured`,
+ * marks rejected on `payment.failed`. Returns `{ ok, reason? }`
+ * — always 200 to Razorpay so it doesn't infinite-retry.
+ */
+export async function processRazorpayWebhook({ rawBody, signature }) {
+  if (!verifyRazorpayWebhookSignature({ rawBody, signature })) {
+    return { ok: false, reason: 'signature' };
+  }
+  let body;
+  try { body = JSON.parse(rawBody); } catch { return { ok: false, reason: 'malformed' }; }
+  const event = body?.event;
+  // We only handle the two terminal events; everything else (e.g.
+  // payment.authorized, refund.*) is acknowledged and ignored.
+  if (event !== 'payment.captured' && event !== 'payment.failed') {
+    return { ok: true, reason: 'ignored', event };
+  }
+  const payment = body?.payload?.payment?.entity;
+  if (!payment) return { ok: false, reason: 'no-payment' };
+  const orderId = payment.order_id;
+  const paymentId = payment.id;
+  if (!orderId) return { ok: false, reason: 'no-order-id' };
+
+  const request = await WalletRequest.findOne({
+    type: 'topup',
+    gatewayOrderId: orderId,
+  });
+  if (!request) return { ok: false, reason: 'no-matching-request', orderId };
+  if (request.status === 'approved') {
+    return { ok: true, reason: 'already-approved', walletRequestId: String(request._id) };
+  }
+  if (request.status === 'rejected') {
+    return { ok: true, reason: 'already-rejected', walletRequestId: String(request._id) };
+  }
+
+  if (event === 'payment.failed') {
+    request.status = 'rejected';
+    request.actionedAt = new Date();
+    request.gatewayPaymentId = paymentId || request.gatewayPaymentId || null;
+    request.adminNote = `razorpay-webhook:failed (${payment.error_code || 'unknown'})`;
+    await request.save();
+    return { ok: true, walletRequestId: String(request._id), status: 'rejected' };
+  }
+
+  // payment.captured → credit the user. Mirror the same first-payment
+  // bonus + referral payout logic the manual approve uses so the
+  // economics match regardless of which path captured the payment.
+  const user = await User.findById(request.userId);
+  if (!user) return { ok: false, reason: 'no-user' };
+
+  const priorApproved = await WalletRequest.countDocuments({
+    userId: user._id,
+    type: 'topup',
+    status: 'approved',
+  });
+  const isFirstTopup = priorApproved === 0;
+  const FIRST_TOPUP_BONUS = 40;
+  const REFERRAL_RATE = 0.1;
+  const bonus = isFirstTopup ? FIRST_TOPUP_BONUS : 0;
+  const finalCredit = round2(request.amount + bonus);
+
+  user.walletBalance = round2((user.walletBalance || 0) + finalCredit);
+  await user.save();
+
+  request.status = 'approved';
+  request.amount = finalCredit;
+  request.actionedAt = new Date();
+  request.gatewayPaymentId = paymentId;
+  request.adminNote = isFirstTopup
+    ? `razorpay-webhook:captured · first-payment-bonus:+${FIRST_TOPUP_BONUS}`
+    : 'razorpay-webhook:captured';
+  await request.save();
+
+  logger.info(
+    {
+      walletRequestId: String(request._id),
+      userId: String(user._id),
+      amount: finalCredit,
+      bonus,
+      orderId,
+      paymentId,
+    },
+    'razorpay topup approved via webhook',
+  );
+
+  if (isFirstTopup && user.referredBy) {
+    const referralPayout = round2(request.amount * REFERRAL_RATE);
+    if (referralPayout > 0) {
+      try {
+        const r = await User.updateOne(
+          { _id: user.referredBy, deletedAt: null, banned: false },
+          {
+            $inc: {
+              referralWalletBalance: referralPayout,
+              referralEarnings: referralPayout,
+            },
+          },
+        );
+        if (r.matchedCount > 0) {
+          await ReferralPayout.create({
+            userId: user.referredBy,
+            referredUserId: user._id,
+            walletRequestId: request._id,
+            amount: referralPayout,
+          });
+        }
+      } catch (err) {
+        logger.error({ err }, 'razorpay-webhook referral payout failed');
+      }
+    }
+  }
+
+  return { ok: true, walletRequestId: String(request._id), status: 'approved' };
+}
+
+
+// ─── Platform payment config ───────────────────────────────────────
+//
+// Right now there's a single knob: `razorpay_enabled`. Admin flips
+// it in /admin → the frontend's Add-credits modal hides the Razorpay
+// tab and falls back to the manual QR + reference flow.
+
+export async function getRazorpayEnabled() {
+  // Default ON for backward compat — existing users / new installs
+  // see the Razorpay tab unless an admin explicitly turns it off.
+  const v = await getSetting('razorpay_enabled', true);
+  return !!v;
+}
+
+export async function setRazorpayEnabled(value) {
+  const next = !!value;
+  await Setting.updateOne(
+    { key: 'razorpay_enabled' },
+    { $set: { value: next } },
+    { upsert: true },
+  );
+  return next;
 }

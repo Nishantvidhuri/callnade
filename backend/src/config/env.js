@@ -32,6 +32,11 @@ const schema = z.object({
   // ship to the frontend — only KEY_ID is exposed there.
   RAZORPAY_KEY_ID: z.string().default(''),
   RAZORPAY_KEY_SECRET: z.string().default(''),
+  // Webhook secret you set in the Razorpay dashboard
+  // (Settings → Webhooks). Verifies the `x-razorpay-signature`
+  // header on incoming webhooks so a random caller can't fake a
+  // "payment captured" event and credit a wallet.
+  RAZORPAY_WEBHOOK_SECRET: z.string().default(''),
 
   // Google OAuth client ID for Sign-in-with-Google. Public (also
   // exposed to the frontend as VITE_GOOGLE_CLIENT_ID), no secret

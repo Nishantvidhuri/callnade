@@ -99,17 +99,26 @@ If you want the local route instead, install Android Studio + the
 Android SDK, then `npx expo run:android` builds straight to a connected
 device or emulator.
 
-## When you're ready to add WebRTC
+## WebRTC video / audio calls
+
+Wired in:
+- `react-native-webrtc` (native module).
+- `@config-plugins/react-native-webrtc` (handles iOS Info.plist + Android manifest entries).
+- `socket.io-client` for signaling, pointed at the same backend the web uses.
+- `src/services/webrtc.js` — fetch ICE, create peer, getUserMedia (front camera), tuneSenders for bitrate caps.
+- `src/services/socket.js` — singleton socket.io connection with JWT in handshake.
+- `src/screens/Call.jsx` — real WebRTC peer connection, RTCView for remote feed, local PIP, mute / camera / hangup controls.
+
+After adding these deps you need to rebuild the dev client once:
 
 ```bash
-npx expo install react-native-webrtc
-npx expo prebuild        # idempotent, refreshes ios/ + android/
-eas build -p android --profile development   # rebuild dev client
+npm install
+npx expo prebuild --clean    # refreshes ios/ + android/
+eas build -p android --profile development
 ```
 
-Then port the camera + signaling code from
-`frontend/src/pages/Call.jsx` and
-`frontend/src/services/webrtc.js`.
+Then `npx expo start --dev-client --tunnel` and reload — every JS
+change to the call screen is hot-reload from there.
 
 ## Architecture mirror
 

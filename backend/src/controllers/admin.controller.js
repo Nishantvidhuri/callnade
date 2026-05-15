@@ -138,3 +138,12 @@ export async function withdrawQr(req, res) {
   res.setHeader('Content-Length', out.buffer.length);
   res.end(out.buffer);
 }
+
+export async function getRazorpayEnabled(_req, res) {
+  res.json({ enabled: await walletService.getRazorpayEnabled() });
+}
+
+export async function setRazorpayEnabled(req, res) {
+  const enabled = await walletService.setRazorpayEnabled(req.body.enabled);
+  res.json({ enabled });
+}

@@ -106,3 +106,29 @@ export async function pollStatus(req, res) {
   const { walletRequestId } = req.query;
   res.json(await walletService.pollWalletRequestStatus(req.user.id, walletRequestId));
 }
+
+/**
+ * Razorpay server-to-server webhook. No auth — the route is gated
+ * by HMAC signature verification inside the service. Always replies
+ * 200 so Razorpay doesn't infinite-retry; the `reason` field shows
+ * up in pino logs for diagnosis.
+ */
+export async function razorpayWebhook(req, res) {
+  const result = await walletService.processRazorpayWebhook({
+    rawBody: req.rawBody,
+    signature: req.header('x-razorpay-signature'),
+  });
+  res.json(result);
+}
+
+/**
+ * Lightweight config endpoint the frontend hits on the Add-credits
+ * modal to decide which tabs to render. Currently exposes only the
+ * razorpay-enabled flag; add more fields here as we get more
+ * toggles (Cashfree, COD, etc.).
+ */
+export async function paymentConfig(_req, res) {
+  res.json({
+    razorpayEnabled: await walletService.getRazorpayEnabled(),
+  });
+}

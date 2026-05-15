@@ -84,3 +84,17 @@ router.patch(
   asyncHandler(admin.togglePaymentQr),
 );
 router.delete('/payment-qrs/:id', asyncHandler(admin.deletePaymentQr));
+
+// Razorpay on/off toggle. Flipping `false` makes the user-facing
+// Add-credits modal hide the Razorpay tab and default to the manual
+// QR + reference flow. One row in `settings` (key:'razorpay_enabled')
+// holds the value.
+const razorpayToggleSchema = z.object({
+  body: z.object({ enabled: z.boolean() }),
+});
+router.get('/razorpay-enabled', asyncHandler(admin.getRazorpayEnabled));
+router.patch(
+  '/razorpay-enabled',
+  validate(razorpayToggleSchema),
+  asyncHandler(admin.setRazorpayEnabled),
+);

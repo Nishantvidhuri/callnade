@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persistAuth } from '../services/api.js';
+import { persistAuth } from '../services/authStorage.js';
 
 /**
  * Auth state — accessToken + the user payload returned by /auth/me
