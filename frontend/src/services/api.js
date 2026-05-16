@@ -28,7 +28,17 @@ api.interceptors.response.use(
           return r.data.accessToken;
         })
         .catch((e) => {
-          useAuthStore.getState().clear();
+          // Only blow away the local session when the refresh call
+          // gets a *definitive* unauthorised response — meaning the
+          // server actually checked the cookie and rejected it
+          // (banned, deleted, token-version bumped by logout, or
+          // truly expired). Network errors, timeouts, 5xx etc. are
+          // transient — we leave the user signed in so the next
+          // request can retry, instead of bouncing them to /login
+          // on every flaky connection.
+          if (e?.response?.status === 401) {
+            useAuthStore.getState().clear();
+          }
           throw e;
         })
         .finally(() => {

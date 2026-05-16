@@ -713,6 +713,37 @@ export default function Signup() {
           {loading ? <Spinner /> : asCreator ? 'Create creator account' : 'Create account'}
         </button>
 
+        {/* Guest fast-track — only for the regular-user signup
+            flow. Creator accounts can't be "guests" (they take
+            real money), so the button is hidden when asCreator. */}
+        {!asCreator && (
+          <>
+            <button
+              type="button"
+              onClick={async () => {
+                setError(null);
+                setLoading(true);
+                try {
+                  const { data } = await api.post('/auth/guest');
+                  useAuthStore.getState().setAuth(data);
+                  nav('/', { replace: true });
+                } catch (err) {
+                  setError(err.message || 'Could not create a guest account');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+              className="w-full px-4 py-3 text-sm font-semibold rounded-full border border-neutral-300 bg-white text-ink hover:bg-neutral-50 active:translate-y-[1px] disabled:opacity-50 transition"
+            >
+              Continue as Guest
+            </button>
+            <p className="text-[11px] text-neutral-500 text-center -mt-1">
+              Free 40 credits to try out a call · no email needed
+            </p>
+          </>
+        )}
+
           </>
         )}
       </form>

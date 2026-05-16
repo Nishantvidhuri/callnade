@@ -294,3 +294,73 @@ export async function refresh(refreshToken) {
 export async function logout(userId) {
   await User.updateOne({ _id: userId }, { $inc: { refreshTokenVersion: 1 } });
 }
+
+/**
+ * Frictionless guest signup — no email / password / consent typing.
+ * Creates a regular `role: 'user'` account flagged `isGuest: true`
+ * with a random unique username + an unguessable, throwaway password.
+ * The viewer can browse, top up, even call creators; converting to a
+ * real account later (claim flow) just patches email + password and
+ * flips `isGuest` to false.
+ *
+ * Returns the same `{ user, accessToken, refreshToken }` shape as
+ * signup so the controller can drop the refresh cookie + reply with
+ * the access token unchanged.
+ */
+const GUEST_ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
+const guestId = customAlphabet(GUEST_ID_ALPHABET, 10);
+const SIGNUP_BONUS_CREDITS_GUEST = 40;
+
+export async function createGuest({ ip } = {}) {
+  // We retry up to 5 times in the (theoretical) case that random
+  // ids collide with an existing row. 36^10 = ~3.6 quadrillion, so
+  // a single collision is astronomically unlikely, but the loop
+  // costs nothing.
+  let user = null;
+  let lastErr = null;
+  for (let attempt = 0; attempt < 5 && !user; attempt++) {
+    const id = guestId();
+    const username = `guest_${id}`;
+    // Email is required + unique on the schema; we synthesise one in
+    // a non-routable subdomain so claim-flow later just overwrites it.
+    const email = `${username}@guest.callnade.site`;
+    // An unguessable random secret hashed via argon2 — nobody can log
+    // in with this since they never see the plaintext. The user
+    // authenticates via the refresh cookie only.
+    const randomSecret = crypto.randomBytes(32).toString('hex');
+    const passwordHash = await argon2.hash(randomSecret, { type: argon2.argon2id });
+    const referralCode = await mintReferralCode();
+
+    try {
+      user = await User.create({
+        email,
+        username,
+        passwordHash,
+        displayName: 'Guest',
+        role: 'user',
+        isGuest: true,
+        referralCode,
+        walletBalance: SIGNUP_BONUS_CREDITS_GUEST,
+        // Auto-accept consent — tapping "Continue as Guest" is the
+        // affirmative action. Stash the IP for the audit trail.
+        consent: {
+          fullName: 'Guest',
+          signature: 'Guest',
+          acceptedAt: new Date(),
+          version: 'guest-v1',
+          ip: ip || null,
+        },
+      });
+    } catch (err) {
+      lastErr = err;
+      // Duplicate key (E11000) → reroll. Anything else → bail.
+      if (err?.code !== 11000) break;
+    }
+  }
+  if (!user) {
+    logger.error({ err: lastErr }, 'failed to create guest account');
+    throw internal('Could not create guest account — please try again');
+  }
+  logger.info({ userId: String(user._id), username: user.username }, 'guest account created');
+  return { user: user.toJSON(), ...tokensFor(user) };
+}

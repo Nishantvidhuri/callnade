@@ -63,6 +63,12 @@ const userSchema = new mongoose.Schema(
     // section instead of the normal Discover tab. Indexed for fast
     // segmentation queries.
     isAdult: { type: Boolean, default: false, index: true },
+    // Guest account — created via POST /auth/guest with random
+    // email/username + a non-authenticatable passwordHash. Lets a
+    // visitor try the platform without going through full signup.
+    // Convertible to a real account later by setting a real email +
+    // password (claim flow, not implemented yet).
+    isGuest: { type: Boolean, default: false, index: true },
     // Snapshot of the T&C / community-guidelines consent the user accepted
     // at signup. Stored verbatim for legal record. version pins the
     // document revision they actually saw.

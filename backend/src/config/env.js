@@ -11,7 +11,11 @@ const schema = z.object({
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_ACCESS_TTL: z.string().default('15m'),
-  JWT_REFRESH_TTL: z.string().default('30d'),
+  // Effectively forever. With rolling refresh (a new refresh token
+  // is minted on every /auth/refresh call), a user is never logged
+  // out as long as they open the app at least once every 10 years.
+  // Bump higher if you ever need to.
+  JWT_REFRESH_TTL: z.string().default('3650d'),
 
   REDIS_URL: z.string().default('redis://127.0.0.1:6379'),
 

@@ -38,6 +38,24 @@ export default function Login() {
     }
   };
 
+  // One-tap guest signup. Backend creates a real User row with
+  // isGuest:true + a random email/username and a non-recoverable
+  // password. Same access/refresh token pair, so all auth'd pages
+  // work without a separate code path.
+  const continueAsGuest = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const { data } = await api.post('/auth/guest');
+      useAuthStore.getState().setAuth(data);
+      nav('/', { replace: true });
+    } catch (err) {
+      setError(err.message || 'Could not create a guest account');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <AuthLayout
       tone="warm"
@@ -86,6 +104,21 @@ export default function Login() {
         <button type="submit" className={ctaCls} disabled={loading}>
           {loading ? <Spinner /> : 'Log in'}
         </button>
+
+        {/* Guest path — no form fields needed, server mints a
+            disposable account with 40 demo credits so the visitor
+            can try the platform immediately. */}
+        <button
+          type="button"
+          onClick={continueAsGuest}
+          disabled={loading}
+          className="w-full px-4 py-3 text-sm font-semibold rounded-full border border-neutral-300 bg-white text-ink hover:bg-neutral-50 active:translate-y-[1px] disabled:opacity-50 transition"
+        >
+          Continue as Guest
+        </button>
+        <p className="text-[11px] text-neutral-500 text-center -mt-1">
+          Free 40 credits to try out a call · no email needed
+        </p>
 
         <Checkbox checked={agree} onChange={setAgree}>
           I agree to the <a href="#" className={linkCls}>Terms &amp; Condition</a>

@@ -51,5 +51,8 @@ const googleSchema = z.object({
 router.post('/signup', authLimiter, validate(signupSchema), asyncHandler(auth.signup));
 router.post('/login', authLimiter, validate(loginSchema), asyncHandler(auth.login));
 router.post('/google', authLimiter, validate(googleSchema), asyncHandler(auth.googleLogin));
+// Guest account — no body, no email/password. Rate-limited like the
+// other auth endpoints so a bot can't spawn a million rows.
+router.post('/guest', authLimiter, asyncHandler(auth.guest));
 router.post('/refresh', asyncHandler(auth.refresh));
 router.post('/logout', requireAuth, asyncHandler(auth.logout));
