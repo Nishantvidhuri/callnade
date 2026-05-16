@@ -106,6 +106,14 @@ export async function joinAndPublish({
   // path when no element is provided. Agora's native renderer is
   // more reliable than wrapping MediaStreamTrack handles.
   const deliverRemote = (user) => {
+    // First sign of life from the remote peer → start the playback
+    // clip. Until now the video has stayed paused at the resume
+    // point, so the call timer (server-side billing) and the clip
+    // timer start together. Idempotent — `__playbackStart` no-ops
+    // on repeat calls.
+    if (session.playbackEl?.__playbackStart) {
+      session.playbackEl.__playbackStart().catch(() => {});
+    }
     if (playRemoteInto && user.videoTrack) {
       // `contain` preserves the source aspect ratio (landscape stays
       // landscape, portrait stays portrait — black bars fill the gap
@@ -308,7 +316,7 @@ export async function republishLocalMedia({
   // Re-render the preview into the local element so the camera
   // shows again after a stuck-camera recovery.
   if (playLocalInto && cam) {
-    try { cam.play(playLocalInto, { fit: 'cover', mirror: false }); } catch {}
+    try { cam.play(playLocalInto, { fit: 'contain', mirror: false }); } catch {}
   }
   // Re-attach the track-ended watcher to the new cam track so the
   // auto-recovery loop keeps firing if the camera gets yanked again.
@@ -377,7 +385,11 @@ async function createPlaybackTracks(
   el.loop = true;
   el.muted = true; // never play the clip's audio locally
   el.playsInline = true;
-  el.autoplay = true;
+  // No autoplay — we stay paused at the resume point until the
+  // call actually connects (deliverRemote fires the first time).
+  // Otherwise the clip burns through 2-3 seconds of useful content
+  // during connection setup.
+  el.autoplay = false;
   el.crossOrigin = 'anonymous'; // R2/CDN — needs CORS to captureStream
   // `metadata` is enough to read videoWidth/Height and start
   // playback streaming. Loading the entire file up-front (the
@@ -452,13 +464,11 @@ async function createPlaybackTracks(
     }
   }
 
-  try { await el.play(); } catch (e) {
-    // Some browsers block autoplay even on a muted video; force it
-    // by re-attempting after a microtask. If it still fails we
-    // bubble up so the caller can fall back to camera.
-    await new Promise((r) => setTimeout(r, 0));
-    await el.play();
-  }
+  // NOTE: we deliberately do NOT call `el.play()` here. The video
+  // stays paused at the resume point. The caller (joinAndPublish)
+  // invokes the returned `startPlayback()` once the call actually
+  // connects, so no clip-time is wasted while signalling /
+  // negotiating WebRTC.
 
   // 2. Pipe the video through a hidden canvas so we can crop pixels
   //    BEFORE captureStream — that way the receiving side never
@@ -478,34 +488,34 @@ async function createPlaybackTracks(
   canvas.height = cropH;
   const ctx = canvas.getContext('2d');
 
-  // Steady 30fps redraw via setInterval. Tried
-  // `requestVideoFrameCallback` first but it stopped firing after
-  // the first second (browser throttling the hidden element / Safari
-  // not honouring the spec), freezing the canvas stream on the last
-  // drawn frame. setInterval doesn't care whether the source video
-  // emitted a new frame — it just redraws whatever's currently
-  // displayed in the <video> element. If the video is paused, the
-  // canvas keeps publishing the same frame, which is harmless. If
-  // the video plays, the canvas keeps up automatically.
+  // The draw interval is created lazily by startPlayback(). Until
+  // then the canvas stays untouched — captureStream just emits
+  // empty / black frames, which is exactly what we want during the
+  // connection-setup phase before the caller is rendering anything.
   let cropping = true;
-  const drawIntervalId = setInterval(() => {
-    if (!cropping) return;
-    try {
-      // Source: (0, srcY) → (vw, srcY+cropH)
-      // Dest:   (0, 0)    → (vw, cropH)
-      ctx.drawImage(el, 0, srcY, vw, cropH, 0, 0, vw, cropH);
-    } catch {
-      /* element may not be ready for a frame yet — next tick will
-         retry without throwing */
-    }
-  }, 33); // ~30fps
+  let drawIntervalId = null;
+  let playbackStarted = false;
+  const startDrawLoop = () => {
+    if (drawIntervalId) return;
+    drawIntervalId = setInterval(() => {
+      if (!cropping) return;
+      try {
+        // Source: (0, srcY) → (vw, srcY+cropH)
+        // Dest:   (0, 0)    → (vw, cropH)
+        ctx.drawImage(el, 0, srcY, vw, cropH, 0, 0, vw, cropH);
+      } catch {
+        /* element may not be ready for a frame yet — next tick will
+           retry without throwing */
+      }
+    }, 33); // ~30fps
+  };
 
   // Defensive: if the looped `<video>` ever pauses (some browsers
-  // pause on loop seek), kick it back into play. Without this the
-  // canvas keeps drawing the last frame and the caller sees a
-  // freeze even though our draw loop is still ticking.
+  // pause on loop seek), kick it back into play — but only AFTER
+  // we've actually started playback. Before then, `pause` is the
+  // intended state, so don't fight it.
   el.addEventListener('pause', () => {
-    if (cropping) el.play().catch(() => {});
+    if (cropping && playbackStarted) el.play().catch(() => {});
   });
 
   // 3. captureStream() from the CANVAS, not the video. 30fps is a
@@ -525,13 +535,38 @@ async function createPlaybackTracks(
   // 5. Wrap the raw MediaStreamTrack as an Agora custom video track.
   const cam = await AgoraRTC.createCustomVideoTrack({ mediaStreamTrack: videoTrack });
 
+  // Caller-driven start: kicks off el.play() AND the canvas draw
+  // loop. Idempotent — safe to call more than once. Stashed on the
+  // element so leave() / joinAndPublish can grab it without an
+  // extra closure plumbed through.
+  el.__playbackStart = async () => {
+    if (playbackStarted) return;
+    playbackStarted = true;
+    startDrawLoop();
+    try {
+      await el.play();
+    } catch {
+      // Some browsers block autoplay even on a muted video; force
+      // it by re-attempting after a microtask. If it still fails
+      // we silently leave the video paused — the canvas will keep
+      // publishing whatever (likely black) frame is currently in
+      // the buffer, and the visibility-change recovery loop will
+      // retry on the next page focus.
+      await new Promise((r) => setTimeout(r, 0));
+      try { await el.play(); } catch {}
+    }
+  };
+
   // Stash the stop hook so leave() can halt the draw loop and let
   // the GC reclaim the canvas + element. Also persist the current
   // playhead so the NEXT call resumes from `saved + resumeOffsetSec`
   // — gives the illusion of a continuous session.
   el.__playbackCropStop = () => {
     cropping = false;
-    try { clearInterval(drawIntervalId); } catch {}
+    if (drawIntervalId) {
+      try { clearInterval(drawIntervalId); } catch {}
+      drawIntervalId = null;
+    }
     if (progressKey) {
       try {
         const t = Number(el.currentTime);

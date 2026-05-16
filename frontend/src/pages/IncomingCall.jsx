@@ -63,6 +63,7 @@ export default function IncomingCall() {
           pooja:  { top: 0,   bottom: 100 },
           meera:  { top: 100, bottom: 100 },
           ishita: { top: 100, bottom: 100 },
+          sia:    { top: 20,  bottom: 20 },
         };
         const usePlayback = me?.usePlaybackVideo && callType === 'video' && me?.username;
         const playbackVideoUrl = usePlayback ? `/playback/${me.username}.mp4` : undefined;
