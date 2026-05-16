@@ -1,4 +1,5 @@
 import { redis } from '../../config/redis.js';
+import { User } from '../../models/user.model.js';
 
 /**
  * Presence model. Two Redis keys per user:
@@ -36,6 +37,11 @@ export async function getStatus(userId) {
   const [online, busy] = await redis.mget(presenceKey(userId), busyKey(userId));
   if (busy) return 'busy';
   if (online) return 'online';
+  // No socket — but `alwaysOnline` accounts still report online
+  // (their busy state is checked first via the early return above).
+  // One indexed lookup; cheap enough for the rare offline path.
+  const u = await User.findById(userId).select('alwaysOnline').lean();
+  if (u?.alwaysOnline) return 'online';
   return 'offline';
 }
 
@@ -43,6 +49,10 @@ export async function getStatus(userId) {
  * Bulk variant for listing endpoints. One round-trip via mget; we
  * concatenate presence + busy keys and split the result. Returns a
  * Map<string-userId, 'online' | 'busy' | 'offline'>.
+ *
+ * For users who came back as 'offline' from Redis, we batch-check
+ * the `alwaysOnline` flag in a single Mongo query and upgrade them
+ * to 'online'. Saves N round trips.
  */
 export async function getStatusMap(ids) {
   const out = new Map();
@@ -50,12 +60,35 @@ export async function getStatusMap(ids) {
   const presKeys = ids.map((id) => presenceKey(id));
   const busyKeys = ids.map((id) => busyKey(id));
   const all = await redis.mget(...presKeys, ...busyKeys);
+  const offlineIds = [];
   ids.forEach((id, i) => {
     const online = all[i];
     const busy = all[ids.length + i];
-    out.set(String(id), busy ? 'busy' : online ? 'online' : 'offline');
+    const status = busy ? 'busy' : online ? 'online' : 'offline';
+    out.set(String(id), status);
+    if (status === 'offline') offlineIds.push(id);
   });
+  if (offlineIds.length) {
+    const sticky = await User.find({
+      _id: { $in: offlineIds },
+      alwaysOnline: true,
+    })
+      .select('_id')
+      .lean();
+    for (const u of sticky) out.set(String(u._id), 'online');
+  }
   return out;
+}
+
+/**
+ * Returns the set of userIds that should be treated as "always
+ * online" — used by listOnline to union them with the Redis-scanned
+ * connected users. Indexed on `alwaysOnline`, so this is one fast
+ * lookup against Mongo per request.
+ */
+export async function getAlwaysOnlineIds() {
+  const rows = await User.find({ alwaysOnline: true }).select('_id').lean();
+  return rows.map((r) => String(r._id));
 }
 
 /**

@@ -35,9 +35,14 @@ const signupSchema = z.object({
   }),
 });
 
+// The `email` field is overloaded — it can be either an actual
+// email OR a username (guest accounts use the latter since their
+// synthetic email is unmemorable). The service decides which to
+// query based on whether it sees an "@". Validation is loose enough
+// to accept both shapes.
 const loginSchema = z.object({
   body: z.object({
-    email: z.string().email(),
+    email: z.string().min(2).max(120),
     password: z.string().min(6).max(128),
   }),
 });

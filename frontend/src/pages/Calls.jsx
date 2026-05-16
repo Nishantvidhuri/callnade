@@ -38,7 +38,13 @@ export default function Calls() {
       remove(call.callId);
       // Forward earnRate + caller's current balance so the creator sees how
       // many credits the caller has left during the call.
-      nav(`/call/incoming/${call.callId}`, {
+      // If the creator is already on /multi-call we just navigate
+      // back there with a new `callId` param — MultiCall picks it up
+      // and folds it into the active sessions list. Otherwise we
+      // open MultiCall fresh with this call as the first session.
+      const onMulti = typeof window !== 'undefined' && window.location.pathname === '/multi-call';
+      nav(`/multi-call?callId=${encodeURIComponent(call.callId)}`, {
+        replace: onMulti,
         state: {
           earnRate: call.earnRate || 0,
           billRate: call.perMinuteRate || 0,

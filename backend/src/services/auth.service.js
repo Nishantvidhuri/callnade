@@ -266,14 +266,28 @@ export async function loginWithGoogle({ idToken, ip }) {
 }
 
 export async function login({ email, password }) {
-  const user = await User.findOne({ email }).select('+passwordHash');
+  // `email` is the wire-name kept for backward compatibility, but the
+  // value can be either an actual email OR a username. Guest accounts
+  // get synthetic placeholder emails they'll never remember, so we
+  // let them log in by their username too. Lookup picks the right
+  // field based on whether the input contains an "@".
+  const identifier = String(email || '').trim();
+  if (!identifier) throw unauthorized('Invalid credentials');
+  const query = identifier.includes('@')
+    ? { email: identifier.toLowerCase() }
+    : { username: identifier.toLowerCase() };
+  const user = await User.findOne(query).select('+passwordHash');
   if (!user) throw unauthorized('Invalid credentials');
   if (user.deletedAt) throw forbidden('Account no longer exists');
   if (user.banned) throw forbidden('Account banned');
   const ok = await argon2.verify(user.passwordHash, password);
   if (!ok) throw unauthorized('Invalid credentials');
+  // Use updateOne instead of save() for the lastSeenAt write — it
+  // skips full-document validation. Otherwise an unrelated bad row
+  // (e.g. walletBalance drifted to -0.0001 from a billing
+  // floating-point error) would 500 the login flow forever.
   user.lastSeenAt = new Date();
-  await user.save();
+  await User.updateOne({ _id: user._id }, { $set: { lastSeenAt: user.lastSeenAt } });
   return { user: user.toJSON(), ...tokensFor(user) };
 }
 
@@ -310,6 +324,11 @@ export async function logout(userId) {
 const GUEST_ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
 const guestId = customAlphabet(GUEST_ID_ALPHABET, 10);
 const SIGNUP_BONUS_CREDITS_GUEST = 40;
+// Default plaintext password baked into every guest signup. Lets a
+// guest who took the "Continue as Guest" path on one browser log in
+// from a different browser using `<username> / password123`.
+// Recoverability over secrecy — by design.
+const GUEST_DEFAULT_PASSWORD = 'password123';
 
 export async function createGuest({ ip } = {}) {
   // We retry up to 5 times in the (theoretical) case that random
@@ -324,11 +343,13 @@ export async function createGuest({ ip } = {}) {
     // Email is required + unique on the schema; we synthesise one in
     // a non-routable subdomain so claim-flow later just overwrites it.
     const email = `${username}@guest.callnade.site`;
-    // An unguessable random secret hashed via argon2 — nobody can log
-    // in with this since they never see the plaintext. The user
-    // authenticates via the refresh cookie only.
-    const randomSecret = crypto.randomBytes(32).toString('hex');
-    const passwordHash = await argon2.hash(randomSecret, { type: argon2.argon2id });
+    // Default guest password is `password123` — chosen for
+    // recoverability, not security. A guest can pick "Continue as
+    // guest" on browser A, then later log in with their username +
+    // password123 on browser B (or change the password from the
+    // profile settings). Each user still gets a unique argon2 hash
+    // (different salt every call), so the on-disk hashes vary.
+    const passwordHash = await argon2.hash(GUEST_DEFAULT_PASSWORD, { type: argon2.argon2id });
     const referralCode = await mintReferralCode();
 
     try {

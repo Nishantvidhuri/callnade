@@ -25,6 +25,7 @@ import AdminPaymentQrs from './pages/AdminPaymentQrs.jsx';
 import Billing from './pages/Billing.jsx';
 import Call from './pages/Call.jsx';
 import IncomingCall from './pages/IncomingCall.jsx';
+import MultiCall from './pages/MultiCall.jsx';
 import AgoraTest from './pages/AgoraTest.jsx';
 import AdminSpectate from './pages/AdminSpectate.jsx';
 import NotFound from './pages/NotFound.jsx';
@@ -34,6 +35,7 @@ const CHROMELESS = [
   '/signup',
   '/call/:peerId',
   '/call/incoming/:callId',
+  '/multi-call',
   '/admin/call/:callId/spectate',
   '/agora-test',
 ];
@@ -104,6 +106,7 @@ export default function App() {
         <Route path="/settings" element={<RequireAuth><SettingsRedirect /></RequireAuth>} />
         <Route path="/call/:peerId" element={<RequireAuth><Call /></RequireAuth>} />
         <Route path="/call/incoming/:callId" element={<RequireAuth><IncomingCall /></RequireAuth>} />
+        <Route path="/multi-call" element={<RequireAuth><MultiCall /></RequireAuth>} />
         <Route path="/agora-test" element={<RequireAuth><AgoraTest /></RequireAuth>} />
         <Route path="/admin/call/:callId/spectate" element={<RequireAuth><AdminSpectate /></RequireAuth>} />
         <Route path="/login" element={<Login />} />

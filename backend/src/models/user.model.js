@@ -77,6 +77,13 @@ const userSchema = new mongoose.Schema(
     // still talk over the loop. Admin flips this per creator from
     // the admin user list.
     usePlaybackVideo: { type: Boolean, default: false },
+    // Sticky-online flag. When true, presence helpers report the
+    // user as `online` even when no socket is connected; they also
+    // appear in the "Online now" rail. Useful for playback-video
+    // creators who shouldn't go dark when the browser tab is closed.
+    // Busy state (an active call) still overrides — they show 'busy'
+    // when actually in a call, online otherwise.
+    alwaysOnline: { type: Boolean, default: false, index: true },
     // Snapshot of the T&C / community-guidelines consent the user accepted
     // at signup. Stored verbatim for legal record. version pins the
     // document revision they actually saw.

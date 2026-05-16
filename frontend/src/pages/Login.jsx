@@ -68,12 +68,18 @@ export default function Login() {
       }
     >
       <form onSubmit={submit} noValidate className="flex flex-col gap-3">
-        <AuthField label="Email Address">
+        <AuthField label="Email or username">
           <IconInput
             icon={Mail}
-            type="email"
-            placeholder="you@example.com"
-            autoComplete="email"
+            // `text` (not `email`) so the browser doesn't reject a
+            // bare username. Backend accepts either — the `@` in the
+            // value is what decides which field it queries on.
+            type="text"
+            inputMode="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            placeholder="you@example.com or your username"
+            autoComplete="username"
             required
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}

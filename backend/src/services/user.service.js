@@ -9,7 +9,7 @@ import { avatarThumb } from '../utils/signedUrl.js';
 import { subscriberPrice } from '../utils/pricing.js';
 import { presentMedia } from './media.service.js';
 import { mintReferralCode } from './auth.service.js';
-import { getStatusMap } from '../realtime/handlers/presence.handlers.js';
+import { getStatusMap, getAlwaysOnlineIds } from '../realtime/handlers/presence.handlers.js';
 
 const PROFILE_CACHE_TTL = 60;
 const profileKey = (username) => `profile:${username}`;
@@ -286,14 +286,18 @@ export async function listMutuals(userId, { limit = 50 } = {}) {
 }
 
 async function getAllOnlineIds() {
-  const ids = [];
+  const seen = new Set();
+  // Real connected sockets, via the presence:* keys.
   let cursor = '0';
   do {
     const [next, batch] = await redis.scan(cursor, 'MATCH', 'presence:*', 'COUNT', 200);
     cursor = next;
-    for (const key of batch) ids.push(key.replace(/^presence:/, ''));
+    for (const key of batch) seen.add(key.replace(/^presence:/, ''));
   } while (cursor !== '0');
-  return ids;
+  // Sticky-online creators (alwaysOnline: true) — show up in the
+  // Online rail regardless of whether their browser is connected.
+  for (const id of await getAlwaysOnlineIds()) seen.add(id);
+  return Array.from(seen);
 }
 
 export async function listOnline({ limit = 24, excludeUserId, adult = false } = {}) {
