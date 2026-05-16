@@ -81,6 +81,12 @@ export async function joinAndPublish({
   // system; 0 = no crop on that edge.
   playbackCropTop = 0,
   playbackCropBottom = 0,
+  // localStorage key for persistent playhead. Lets a creator's
+  // clip resume `playbackResumeOffsetSec` after where the previous
+  // call hung up, so repeat callers don't see the same opening
+  // shot every time.
+  playbackProgressKey = null,
+  playbackResumeOffsetSec = 20,
 }) {
   if (!callId || !userId) throw new Error('agora.joinAndPublish: missing args');
   if (!AGORA_APP_ID) {
@@ -171,6 +177,8 @@ export async function joinAndPublish({
     ({ mic, cam, playbackEl } = await createPlaybackTracks(playbackVideoUrl, {
       cropTop: playbackCropTop,
       cropBottom: playbackCropBottom,
+      progressKey: playbackProgressKey,
+      resumeOffsetSec: playbackResumeOffsetSec,
     }));
   } else {
     ({ mic, cam } = await createLocalTracks(callType));
@@ -359,17 +367,23 @@ function buildLocalStream({ mic, cam }) {
  *     so the creator's local mic isn't fighting with the clip's
  *     audio track. The outgoing audio is the creator's live mic only.
  */
-async function createPlaybackTracks(playbackUrl, { cropTop = 0, cropBottom = 0 } = {}) {
-  // 1. Hidden offscreen <video>. position:fixed so it can be sized
-  //    1×1 without disturbing layout; opacity 0 + pointer-events
-  //    none so it's truly invisible.
+async function createPlaybackTracks(
+  playbackUrl,
+  { cropTop = 0, cropBottom = 0, progressKey = null, resumeOffsetSec = 20 } = {},
+) {
+  // 1. Hidden offscreen <video>. Attach listeners BEFORE setting
+  //    .src so we never miss an early event on a fast-loading file.
   const el = document.createElement('video');
-  el.src = playbackUrl;
   el.loop = true;
   el.muted = true; // never play the clip's audio locally
   el.playsInline = true;
   el.autoplay = true;
   el.crossOrigin = 'anonymous'; // R2/CDN — needs CORS to captureStream
+  // `metadata` is enough to read videoWidth/Height and start
+  // playback streaming. Loading the entire file up-front (the
+  // default) on a 90MB+ clip can race past our error handler
+  // before metadata is ready and throw a noisy "Could not load".
+  el.preload = 'metadata';
   Object.assign(el.style, {
     position: 'fixed',
     left: '0',
@@ -382,14 +396,62 @@ async function createPlaybackTracks(playbackUrl, { cropTop = 0, cropBottom = 0 }
   });
   document.body.appendChild(el);
 
-  // Wait for the video to actually start producing frames. Browsers
-  // need at least `loadeddata` AND a successful play() before
-  // captureStream's video track is live.
+  // Wait for either loadedmetadata OR an actual error. Some browsers
+  // fire `error` transiently on big files; we treat that as a real
+  // failure only if videoWidth never becomes positive within the
+  // timeout window.
   await new Promise((resolve, reject) => {
-    const onReady = () => { el.removeEventListener('loadeddata', onReady); resolve(); };
-    el.addEventListener('loadeddata', onReady);
-    el.addEventListener('error', () => reject(new Error('Could not load playback video')));
+    let settled = false;
+    const settle = (ok, reason) => {
+      if (settled) return;
+      settled = true;
+      el.removeEventListener('loadedmetadata', onMeta);
+      el.removeEventListener('canplay', onMeta);
+      el.removeEventListener('error', onErr);
+      clearTimeout(timeoutId);
+      ok ? resolve() : reject(new Error(reason));
+    };
+    const onMeta = () => {
+      if (el.videoWidth > 0) settle(true);
+    };
+    const onErr = () => {
+      const code = el.error?.code;
+      const msg = el.error?.message || 'unknown';
+      settle(false, `Could not load playback video (code=${code}: ${msg})`);
+    };
+    // 15s ceiling so we don't block the entire call setup on a
+    // pathological file. If metadata still isn't ready by then, the
+    // file is almost certainly broken (wrong codec / 404 / etc.).
+    const timeoutId = setTimeout(
+      () => settle(false, 'Playback video timed out while loading'),
+      15_000,
+    );
+    el.addEventListener('loadedmetadata', onMeta);
+    el.addEventListener('canplay', onMeta);
+    el.addEventListener('error', onErr);
+    el.src = playbackUrl;
   });
+
+  // Resume the video at the saved progress + a 20s "ad-break" so the
+  // call appears to be a continuous session that the caller dipped
+  // out of and rejoined. Wraps at the end of the clip so we never
+  // try to seek past duration.
+  if (progressKey) {
+    try {
+      const raw = localStorage.getItem(progressKey);
+      const saved = raw != null ? Number(raw) : NaN;
+      if (Number.isFinite(saved) && saved >= 0) {
+        const dur = Number(el.duration) || 0;
+        const target = dur > 0
+          ? (saved + Number(resumeOffsetSec || 0)) % dur
+          : saved + Number(resumeOffsetSec || 0);
+        try { el.currentTime = Math.max(0, target); } catch {}
+      }
+    } catch {
+      /* localStorage unavailable — fall through, video plays from 0 */
+    }
+  }
+
   try { await el.play(); } catch (e) {
     // Some browsers block autoplay even on a muted video; force it
     // by re-attempting after a microtask. If it still fails we
@@ -464,10 +526,20 @@ async function createPlaybackTracks(playbackUrl, { cropTop = 0, cropBottom = 0 }
   const cam = await AgoraRTC.createCustomVideoTrack({ mediaStreamTrack: videoTrack });
 
   // Stash the stop hook so leave() can halt the draw loop and let
-  // the GC reclaim the canvas + element.
+  // the GC reclaim the canvas + element. Also persist the current
+  // playhead so the NEXT call resumes from `saved + resumeOffsetSec`
+  // — gives the illusion of a continuous session.
   el.__playbackCropStop = () => {
     cropping = false;
     try { clearInterval(drawIntervalId); } catch {}
+    if (progressKey) {
+      try {
+        const t = Number(el.currentTime);
+        if (Number.isFinite(t) && t >= 0) {
+          localStorage.setItem(progressKey, String(t));
+        }
+      } catch {}
+    }
   };
 
   return { mic, cam, playbackEl: el };

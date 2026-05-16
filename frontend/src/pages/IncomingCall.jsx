@@ -60,8 +60,9 @@ export default function IncomingCall() {
         // chopped rows (used to hide watermarks / source-app footers
         // burnt into the source clip). Keys match the username.
         const PLAYBACK_CROPS = {
-          pooja: { top: 0,   bottom: 100 },
-          meera: { top: 100, bottom: 100 },
+          pooja:  { top: 0,   bottom: 100 },
+          meera:  { top: 100, bottom: 100 },
+          ishita: { top: 100, bottom: 100 },
         };
         const usePlayback = me?.usePlaybackVideo && callType === 'video' && me?.username;
         const playbackVideoUrl = usePlayback ? `/playback/${me.username}.mp4` : undefined;
@@ -76,6 +77,19 @@ export default function IncomingCall() {
           playbackVideoUrl,
           playbackCropTop: playbackCrop.top || 0,
           playbackCropBottom: playbackCrop.bottom || 0,
+          // Per-CALLER resume: the clip continues `+20s` only when
+          // the same person calls back. A different caller always
+          // starts from 0:00, so each viewer sees a fresh opening
+          // shot the first time. Key includes both the creator and
+          // the caller's username to keep state separate.
+          // `callerLabel` is the caller's username from loc.state;
+          // if for some reason we don't have it, we disable
+          // resume by passing null (always start from 0).
+          playbackProgressKey:
+            usePlayback && callerLabel
+              ? `callnade:playback-progress:${me.username}:${callerLabel}`
+              : null,
+          playbackResumeOffsetSec: 20,
           onRemoteStream: () => setStatus('connected'),
           onRoomState: (reason) => {
             if (reason === 'KICKOUT' || reason === 'TOKEN_EXPIRED') {
