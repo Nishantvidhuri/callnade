@@ -137,20 +137,30 @@ export async function getPublicProfile(username, viewerId) {
   let isFollower = false;
   let isFollowedBy = false;
   let hasPendingRequest = false;
+  // Resolve the viewer's admin status in parallel with the follow
+  // lookups. Admins get an unconditional bypass on locked-photo
+  // gating — same way they can already see verification photos +
+  // consent PDFs in the admin panel.
+  let viewerIsAdmin = false;
   if (!isOwner && viewerId) {
-    const [a, b, c] = await Promise.all([
+    const [a, b, c, viewer] = await Promise.all([
       Follow.exists({ follower: viewerId, followee: user._id }),
       Follow.exists({ follower: user._id, followee: viewerId }),
       FollowRequest.exists({ from: viewerId, to: user._id }),
+      User.findById(viewerId).select('role isAdmin').lean(),
     ]);
     isFollower = !!a;
     isFollowedBy = !!b;
     hasPendingRequest = !!c;
+    viewerIsAdmin = !!(viewer?.isAdmin || viewer?.role === 'admin');
   }
   const isMutual = isFollower && isFollowedBy;
   // Subscriptions are no longer required to chat or call — anyone can reach anyone.
   const canMessage = !isOwner;
-  const canViewLocked = isOwner || isFollower;
+  // Admins can view every locked photo of every user, full stop.
+  // Owners always see their own. Followers see locked photos of who
+  // they follow (existing private-account semantics).
+  const canViewLocked = isOwner || isFollower || viewerIsAdmin;
 
   const [avatar, galleryDocs, packages, presenceMap] = await Promise.all([
     loadAvatar(user.avatarMediaId),

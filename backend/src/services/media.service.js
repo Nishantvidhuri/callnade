@@ -147,7 +147,11 @@ async function canViewFull(viewerId, media) {
   if (!viewerId) return media.visibility === 'public';
   if (String(viewerId) === String(media.userId)) return true;
   if (media.visibility === 'public') return true;
-  return !!(await Follow.exists({ follower: viewerId, followee: media.userId }));
+  if (await Follow.exists({ follower: viewerId, followee: media.userId })) return true;
+  // Admin override — admins can open locked / private images of any
+  // user. Same DB hit as isAdminUser used by the verification path,
+  // only fires after the cheaper checks fail.
+  return !!(await isAdminUser(viewerId));
 }
 
 export function presentMedia(media, { canViewLocked }) {

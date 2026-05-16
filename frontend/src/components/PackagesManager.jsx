@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2, Save, Package as PackageIcon, Edit3, X, Phone, Video } from 'lucide-react';
 import { api } from '../services/api.js';
 
-export default function PackagesManager() {
+/**
+ * Props:
+ *   autoNew — when truthy ('video' / 'audio' / true), the manager
+ *     opens with the new-package form already showing instead of the
+ *     list view. Used by the "+" button on the Profile page so a
+ *     creator gets straight to filling in a new package.
+ */
+export default function PackagesManager({ autoNew = null } = {}) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -23,6 +30,15 @@ export default function PackagesManager() {
   useEffect(() => {
     load();
   }, []);
+
+  // Auto-open the new-package form when the parent asked for it.
+  // Runs once on mount — guarded so reopening the modal with a new
+  // `autoNew` prop value works too.
+  useEffect(() => {
+    if (!autoNew) return;
+    startNew(autoNew === 'audio' ? 'audio' : 'video');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoNew]);
 
   const startNew = (callType = 'video') => {
     setForm({

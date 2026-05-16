@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Video, Phone, Camera, Lock, BellRing, BellPlus, Check,
-  Save, LogOut, Edit3, Receipt, Shield, Package as PackageIcon, X,
+  Save, LogOut, Edit3, Receipt, Shield, Package as PackageIcon, X, Plus,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuthStore } from '../stores/auth.store.js';
@@ -38,6 +38,10 @@ export default function Profile() {
   // creator can jump straight to package management without
   // toggling on the larger settings drawer.
   const [pkgManagerOpen, setPkgManagerOpen] = useState(false);
+  // When the creator taps "+ Package" we open the manager with the
+  // new-package form already showing. Null = open in list view (the
+  // existing "Packages" / edit-drawer entry points).
+  const [pkgManagerAutoNew, setPkgManagerAutoNew] = useState(null);
   // Inline-settings state — only used when viewing own profile (isMe).
   const [editing, setEditing] = useState(false);
   const [settingsForm, setSettingsForm] = useState({ displayName: '', bio: '', isPrivate: true, isAdult: false });
@@ -328,18 +332,39 @@ export default function Profile() {
             >
               <Edit3 size={14} /> {editing ? 'Close edit' : 'Edit profile'}
             </button>
-            {/* Packages quick-edit — provider-only. Opens the
-                PackagesManager in a focused modal so the creator can
-                tweak prices / durations without toggling the bigger
-                "Edit profile" drawer first. */}
+            {/* Packages — provider-only. Two entry points:
+                  · "+ Package"   → opens PackagesManager with the new-
+                                    package form already showing (one
+                                    tap to create).
+                  · The package icon (no plus) → opens the manager in
+                                    list view so the creator can edit /
+                                    delete existing packages.
+                Both reuse the same modal, just toggling `autoNew`. */}
             {profile.user.role === 'provider' && (
-              <button
-                type="button"
-                onClick={() => setPkgManagerOpen(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-brand-200 text-brand-600 bg-brand-50 hover:bg-brand-100 transition"
-              >
-                <PackageIcon size={14} /> Packages
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPkgManagerAutoNew('video');
+                    setPkgManagerOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg text-white bg-tinder shadow-md shadow-tinder/30 hover:brightness-110 transition"
+                  title="Create a new call package"
+                >
+                  <Plus size={14} strokeWidth={2.8} /> Package
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPkgManagerAutoNew(null);
+                    setPkgManagerOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-brand-200 text-brand-600 bg-brand-50 hover:bg-brand-100 transition"
+                  title="Manage existing packages"
+                >
+                  <PackageIcon size={14} /> Packages
+                </button>
+              </>
             )}
             <Link
               to="/billing"
@@ -596,7 +621,10 @@ export default function Profile() {
                 <p className="font-bold text-base">Manage packages</p>
               </div>
               <button
-                onClick={() => setPkgManagerOpen(false)}
+                onClick={() => {
+                  setPkgManagerOpen(false);
+                  setPkgManagerAutoNew(null);
+                }}
                 aria-label="Close"
                 className="w-8 h-8 grid place-items-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-ink transition"
               >
@@ -604,7 +632,7 @@ export default function Profile() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 sm:p-5">
-              <PackagesManager />
+              <PackagesManager autoNew={pkgManagerAutoNew} />
             </div>
           </div>
           <style>{`@keyframes pop{from{transform:scale(0.96);opacity:0}to{transform:scale(1);opacity:1}}`}</style>
