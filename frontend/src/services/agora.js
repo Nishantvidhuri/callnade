@@ -75,6 +75,12 @@ export async function joinAndPublish({
   // creator can still talk. Used by the admin-flipped
   // `usePlaybackVideo` mode.
   playbackVideoUrl,
+  // Optional per-creator crop in pixels. Lets the consumer chop off
+  // burnt-in watermarks / footers before the bytes hit Agora's
+  // encoder. Numbers are pixels in the source video's coordinate
+  // system; 0 = no crop on that edge.
+  playbackCropTop = 0,
+  playbackCropBottom = 0,
 }) {
   if (!callId || !userId) throw new Error('agora.joinAndPublish: missing args');
   if (!AGORA_APP_ID) {
@@ -162,7 +168,10 @@ export async function joinAndPublish({
   // module expects, just with `cam` swapped for the synthesized one.
   let mic, cam, playbackEl;
   if (playbackVideoUrl && callType === 'video') {
-    ({ mic, cam, playbackEl } = await createPlaybackTracks(playbackVideoUrl));
+    ({ mic, cam, playbackEl } = await createPlaybackTracks(playbackVideoUrl, {
+      cropTop: playbackCropTop,
+      cropBottom: playbackCropBottom,
+    }));
   } else {
     ({ mic, cam } = await createLocalTracks(callType));
   }
@@ -350,7 +359,7 @@ function buildLocalStream({ mic, cam }) {
  *     so the creator's local mic isn't fighting with the clip's
  *     audio track. The outgoing audio is the creator's live mic only.
  */
-async function createPlaybackTracks(playbackUrl) {
+async function createPlaybackTracks(playbackUrl, { cropTop = 0, cropBottom = 0 } = {}) {
   // 1. Hidden offscreen <video>. position:fixed so it can be sized
   //    1×1 without disturbing layout; opacity 0 + pointer-events
   //    none so it's truly invisible.
@@ -389,16 +398,19 @@ async function createPlaybackTracks(playbackUrl) {
     await el.play();
   }
 
-  // 2. Pipe the video through a hidden canvas so we can crop the
-  //    bottom 100 px BEFORE captureStream — that way the receiving
-  //    side never sees the chopped pixels (e.g. a watermark / footer
-  //    burnt into the clip). Without this, an `object-fit: cover` /
-  //    CSS-only crop only hides the bottom on our side; the caller
-  //    still gets the full frame.
-  const CROP_BOTTOM_PX = 100;
+  // 2. Pipe the video through a hidden canvas so we can crop pixels
+  //    BEFORE captureStream — that way the receiving side never
+  //    sees the chopped rows (e.g. a watermark burnt into the
+  //    top/bottom of the source). Without this, a CSS-only crop
+  //    only hides the area on our side; the caller still gets
+  //    the full frame.
   const vw = el.videoWidth || 720;
   const vh = el.videoHeight || 1280;
-  const cropH = Math.max(1, vh - CROP_BOTTOM_PX);
+  // Source rectangle: skip `cropTop` rows from the top, end
+  // `cropBottom` rows before the bottom. Clamp to a min height of 1
+  // so we never feed drawImage a zero-or-negative sH.
+  const srcY = Math.max(0, Math.min(cropTop, vh - 1));
+  const cropH = Math.max(1, vh - srcY - Math.max(0, cropBottom));
   const canvas = document.createElement('canvas');
   canvas.width = vw;
   canvas.height = cropH;
@@ -417,7 +429,9 @@ async function createPlaybackTracks(playbackUrl) {
   const drawIntervalId = setInterval(() => {
     if (!cropping) return;
     try {
-      ctx.drawImage(el, 0, 0, vw, cropH, 0, 0, vw, cropH);
+      // Source: (0, srcY) → (vw, srcY+cropH)
+      // Dest:   (0, 0)    → (vw, cropH)
+      ctx.drawImage(el, 0, srcY, vw, cropH, 0, 0, vw, cropH);
     } catch {
       /* element may not be ready for a frame yet — next tick will
          retry without throwing */

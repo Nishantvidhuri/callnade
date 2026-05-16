@@ -54,10 +54,18 @@ export default function IncomingCall() {
         // Files are looked up at /playback/<username>.mp4 — drop a
         // file at frontend/public/playback/<username>.mp4 to wire a
         // new creator. Mic stays live so they can still talk.
-        const playbackVideoUrl =
-          me?.usePlaybackVideo && callType === 'video' && me?.username
-            ? `/playback/${me.username}.mp4`
-            : undefined;
+        //
+        // Optional per-creator crop in pixels — applied before the
+        // bytes hit Agora's encoder, so the receiver never sees the
+        // chopped rows (used to hide watermarks / source-app footers
+        // burnt into the source clip). Keys match the username.
+        const PLAYBACK_CROPS = {
+          pooja: { top: 0,   bottom: 100 },
+          meera: { top: 100, bottom: 100 },
+        };
+        const usePlayback = me?.usePlaybackVideo && callType === 'video' && me?.username;
+        const playbackVideoUrl = usePlayback ? `/playback/${me.username}.mp4` : undefined;
+        const playbackCrop = usePlayback ? (PLAYBACK_CROPS[me.username] || {}) : {};
 
         const session = await joinAndPublish({
           callId,
@@ -66,6 +74,8 @@ export default function IncomingCall() {
           playLocalInto: localVideo.current || undefined,
           playRemoteInto: remoteVideo.current || undefined,
           playbackVideoUrl,
+          playbackCropTop: playbackCrop.top || 0,
+          playbackCropBottom: playbackCrop.bottom || 0,
           onRemoteStream: () => setStatus('connected'),
           onRoomState: (reason) => {
             if (reason === 'KICKOUT' || reason === 'TOKEN_EXPIRED') {
