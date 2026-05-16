@@ -25,7 +25,7 @@ export async function listAllUsers({ cursor, limit = 30, q, sort = 'newest' } = 
   const users = await User.find(filter)
     .sort({ _id: order })
     .limit(limit + 1)
-    .select('_id email username displayName avatarMediaId followerCount followingCount isAdmin role banned bannedAt deletedAt walletBalance earningsBalance createdAt lastSeenAt')
+    .select('_id email username displayName avatarMediaId followerCount followingCount isAdmin role banned bannedAt deletedAt walletBalance earningsBalance createdAt lastSeenAt usePlaybackVideo')
     .lean();
 
   const hasMore = users.length > limit;
@@ -62,6 +62,7 @@ export async function listAllUsers({ cursor, limit = 30, q, sort = 'newest' } = 
       deletedAt: u.deletedAt || null,
       walletBalance: u.walletBalance || 0,
       earningsBalance: u.earningsBalance || 0,
+      usePlaybackVideo: !!u.usePlaybackVideo,
       online: onlineSet.has(String(u._id)),
       createdAt: u.createdAt,
       lastSeenAt: u.lastSeenAt,
@@ -174,6 +175,25 @@ export async function unbanUser(targetId) {
   await target.save();
   await redis.del(`profile:${target.username}`).catch(() => {});
   return { ok: true, userId: targetId };
+}
+
+/**
+ * Flip `usePlaybackVideo` on any creator. When on, the call flow
+ * publishes a shared pre-recorded clip (frontend constant) as that
+ * creator's outgoing video instead of their live camera. Mic stays
+ * live. Admin-only — there's no self-serve toggle for creators on
+ * the profile.
+ */
+export async function setPlaybackVideo(targetId, enabled) {
+  const target = await User.findById(targetId);
+  if (!target) throw notFound('User not found');
+  if (target.role !== 'provider') {
+    throw badRequest('Only creators can have a playback video');
+  }
+  target.usePlaybackVideo = !!enabled;
+  await target.save();
+  await redis.del(`profile:${target.username}`).catch(() => {});
+  return { ok: true, userId: targetId, usePlaybackVideo: target.usePlaybackVideo };
 }
 
 function escapeRegex(s) {

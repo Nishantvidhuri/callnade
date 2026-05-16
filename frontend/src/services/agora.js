@@ -69,6 +69,12 @@ export async function joinAndPublish({
   // remote video is rendered via Agora's play() too; when omitted,
   // we fall back to the legacy MediaStream-via-onRemoteStream path.
   playRemoteInto,
+  // Optional URL to a pre-recorded clip. When provided, the outgoing
+  // VIDEO track is the clip looped on a hidden <video> element
+  // (captureStream() → Agora custom track). Mic stays live so the
+  // creator can still talk. Used by the admin-flipped
+  // `usePlaybackVideo` mode.
+  playbackVideoUrl,
 }) {
   if (!callId || !userId) throw new Error('agora.joinAndPublish: missing args');
   if (!AGORA_APP_ID) {
@@ -89,7 +95,11 @@ export async function joinAndPublish({
   // more reliable than wrapping MediaStreamTrack handles.
   const deliverRemote = (user) => {
     if (playRemoteInto && user.videoTrack) {
-      try { user.videoTrack.play(playRemoteInto, { fit: 'cover' }); } catch {}
+      // `contain` preserves the source aspect ratio (landscape stays
+      // landscape, portrait stays portrait — black bars fill the gap
+      // when the tile shape differs). `cover` would crop, which was
+      // mangling the playback clip when its aspect didn't match.
+      try { user.videoTrack.play(playRemoteInto, { fit: 'contain' }); } catch {}
     }
     if (user.audioTrack) {
       try { user.audioTrack.play(); } catch {}
@@ -145,11 +155,25 @@ export async function joinAndPublish({
 
   // ---- join + create tracks + publish ------------------------------
   await client.join(tokenResp.appId, channel, tokenResp.token, tokenResp.uid);
-  const { mic, cam } = await createLocalTracks(callType);
+
+  // Branch on playback mode. When a `playbackVideoUrl` is provided
+  // we wrap the pre-recorded clip as a custom video track and pair
+  // it with a live mic — same `mic + cam` shape the rest of this
+  // module expects, just with `cam` swapped for the synthesized one.
+  let mic, cam, playbackEl;
+  if (playbackVideoUrl && callType === 'video') {
+    ({ mic, cam, playbackEl } = await createPlaybackTracks(playbackVideoUrl));
+  } else {
+    ({ mic, cam } = await createLocalTracks(callType));
+  }
   session.mic = mic;
   session.cam = cam;
+  session.playbackEl = playbackEl || null;
   if (playLocalInto && cam) {
-    try { cam.play(playLocalInto, { fit: 'cover', mirror: false }); } catch {}
+    // Local preview uses the same fit rule. `contain` keeps the
+    // creator's own thumbnail aspect-correct — important when the
+    // outgoing video is a pre-recorded portrait clip.
+    try { cam.play(playLocalInto, { fit: 'contain', mirror: false }); } catch {}
   }
   const toPublish = [mic, cam].filter(Boolean);
   if (toPublish.length) await client.publish(toPublish);
@@ -210,6 +234,15 @@ export async function joinAndPublish({
     try { session.mic?.stop(); } catch {}
     try { session.cam?.close(); } catch {}
     try { session.mic?.close(); } catch {}
+    // Playback mode keeps a hidden <video> + a canvas-draw loop
+    // alive; stop the loop and tear the element down so it doesn't
+    // keep decoding (and burning CPU) after the call.
+    if (session.playbackEl) {
+      try { session.playbackEl.__playbackCropStop?.(); } catch {}
+      try { session.playbackEl.pause(); } catch {}
+      try { session.playbackEl.remove(); } catch {}
+      session.playbackEl = null;
+    }
     session.mic = null;
     session.cam = null;
     session.remoteStreams.clear();
@@ -298,4 +331,130 @@ function buildLocalStream({ mic, cam }) {
     try { ms.addTrack(mic.getMediaStreamTrack()); } catch {}
   }
   return ms;
+}
+
+/**
+ * Create a (mic, custom video) pair where the video stream comes
+ * from a pre-recorded clip looped on a hidden `<video>` element via
+ * `captureStream()`. The mic is normal `getUserMedia` so the creator
+ * can still talk over the loop.
+ *
+ * Browser quirks:
+ *   - The <video> must be attached to the DOM and *play* before
+ *     captureStream() can produce frames. We make it 1×1 px and
+ *     visually hidden but technically visible (not display:none —
+ *     hidden video stops decoding on some browsers).
+ *   - Loop is set so the call doesn't suddenly cut to black after
+ *     the clip ends.
+ *   - We mute the playback element on our end (`videoEl.muted = true`)
+ *     so the creator's local mic isn't fighting with the clip's
+ *     audio track. The outgoing audio is the creator's live mic only.
+ */
+async function createPlaybackTracks(playbackUrl) {
+  // 1. Hidden offscreen <video>. position:fixed so it can be sized
+  //    1×1 without disturbing layout; opacity 0 + pointer-events
+  //    none so it's truly invisible.
+  const el = document.createElement('video');
+  el.src = playbackUrl;
+  el.loop = true;
+  el.muted = true; // never play the clip's audio locally
+  el.playsInline = true;
+  el.autoplay = true;
+  el.crossOrigin = 'anonymous'; // R2/CDN — needs CORS to captureStream
+  Object.assign(el.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '1px',
+    height: '1px',
+    opacity: '0',
+    pointerEvents: 'none',
+    zIndex: '-1',
+  });
+  document.body.appendChild(el);
+
+  // Wait for the video to actually start producing frames. Browsers
+  // need at least `loadeddata` AND a successful play() before
+  // captureStream's video track is live.
+  await new Promise((resolve, reject) => {
+    const onReady = () => { el.removeEventListener('loadeddata', onReady); resolve(); };
+    el.addEventListener('loadeddata', onReady);
+    el.addEventListener('error', () => reject(new Error('Could not load playback video')));
+  });
+  try { await el.play(); } catch (e) {
+    // Some browsers block autoplay even on a muted video; force it
+    // by re-attempting after a microtask. If it still fails we
+    // bubble up so the caller can fall back to camera.
+    await new Promise((r) => setTimeout(r, 0));
+    await el.play();
+  }
+
+  // 2. Pipe the video through a hidden canvas so we can crop the
+  //    bottom 100 px BEFORE captureStream — that way the receiving
+  //    side never sees the chopped pixels (e.g. a watermark / footer
+  //    burnt into the clip). Without this, an `object-fit: cover` /
+  //    CSS-only crop only hides the bottom on our side; the caller
+  //    still gets the full frame.
+  const CROP_BOTTOM_PX = 100;
+  const vw = el.videoWidth || 720;
+  const vh = el.videoHeight || 1280;
+  const cropH = Math.max(1, vh - CROP_BOTTOM_PX);
+  const canvas = document.createElement('canvas');
+  canvas.width = vw;
+  canvas.height = cropH;
+  const ctx = canvas.getContext('2d');
+
+  // Steady 30fps redraw via setInterval. Tried
+  // `requestVideoFrameCallback` first but it stopped firing after
+  // the first second (browser throttling the hidden element / Safari
+  // not honouring the spec), freezing the canvas stream on the last
+  // drawn frame. setInterval doesn't care whether the source video
+  // emitted a new frame — it just redraws whatever's currently
+  // displayed in the <video> element. If the video is paused, the
+  // canvas keeps publishing the same frame, which is harmless. If
+  // the video plays, the canvas keeps up automatically.
+  let cropping = true;
+  const drawIntervalId = setInterval(() => {
+    if (!cropping) return;
+    try {
+      ctx.drawImage(el, 0, 0, vw, cropH, 0, 0, vw, cropH);
+    } catch {
+      /* element may not be ready for a frame yet — next tick will
+         retry without throwing */
+    }
+  }, 33); // ~30fps
+
+  // Defensive: if the looped `<video>` ever pauses (some browsers
+  // pause on loop seek), kick it back into play. Without this the
+  // canvas keeps drawing the last frame and the caller sees a
+  // freeze even though our draw loop is still ticking.
+  el.addEventListener('pause', () => {
+    if (cropping) el.play().catch(() => {});
+  });
+
+  // 3. captureStream() from the CANVAS, not the video. 30fps is a
+  //    good default for talking-head clips — bumping higher just
+  //    burns bandwidth.
+  if (typeof canvas.captureStream !== 'function') {
+    throw new Error('canvas.captureStream() is unsupported in this browser');
+  }
+  const captured = canvas.captureStream(30);
+  const videoTrack = captured.getVideoTracks()[0];
+  if (!videoTrack) throw new Error('Playback canvas has no video track');
+
+  // 4. Mic from getUserMedia (audio only). Real-time mic so the
+  //    creator can still talk over the loop.
+  const mic = await AgoraRTC.createMicrophoneAudioTrack();
+
+  // 5. Wrap the raw MediaStreamTrack as an Agora custom video track.
+  const cam = await AgoraRTC.createCustomVideoTrack({ mediaStreamTrack: videoTrack });
+
+  // Stash the stop hook so leave() can halt the draw loop and let
+  // the GC reclaim the canvas + element.
+  el.__playbackCropStop = () => {
+    cropping = false;
+    try { clearInterval(drawIntervalId); } catch {}
+  };
+
+  return { mic, cam, playbackEl: el };
 }

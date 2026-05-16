@@ -69,6 +69,14 @@ const userSchema = new mongoose.Schema(
     // Convertible to a real account later by setting a real email +
     // password (claim flow, not implemented yet).
     isGuest: { type: Boolean, default: false, index: true },
+
+    // Creator-only playback video flag. When true, the call flow
+    // publishes a shared pre-recorded clip (shipped in the frontend
+    // bundle at VITE_PLAYBACK_VIDEO_URL) as the outgoing video track
+    // instead of the live camera. Mic stays live so the creator can
+    // still talk over the loop. Admin flips this per creator from
+    // the admin user list.
+    usePlaybackVideo: { type: Boolean, default: false },
     // Snapshot of the T&C / community-guidelines consent the user accepted
     // at signup. Stored verbatim for legal record. version pins the
     // document revision they actually saw.

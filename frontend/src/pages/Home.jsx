@@ -55,11 +55,23 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
-  // 18+ section state. `adultMode` flips the popular/online query to fetch
-  // adult creators. `adultPending` is true while the gate modal is up;
-  // confirming flips adultMode true. Modal re-shows EVERY time the user
-  // taps the 18+ tab fresh (no localStorage cookie).
-  const [adultMode, setAdultMode] = useState(false);
+  // 18+ section state. `adultMode` flips the popular/online query
+  // to fetch adult creators. We persist the preference + the
+  // "already confirmed once" flag in localStorage so a user who
+  // picked 18+ on a previous visit lands back there directly,
+  // without re-tapping the tab or seeing the consent modal again.
+  //
+  //   callnade:discover-pref     'adult' | 'regular' (last picked)
+  //   callnade:adult-confirmed   '1' once they've ever accepted
+  //                              the 18+ confirmation modal
+  const [adultMode, setAdultMode] = useState(() => {
+    try {
+      return localStorage.getItem('callnade:discover-pref') === 'adult'
+        && localStorage.getItem('callnade:adult-confirmed') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [adultPending, setAdultPending] = useState(false);
   const debounceRef = useRef(null);
   const sentinelRef = useRef(null);
@@ -242,9 +254,23 @@ export default function Home() {
                   onSwitch={(next) => {
                     if (next === adultMode) return;
                     if (next === true) {
-                      setAdultPending(true); // open the age-confirm gate
+                      // If this browser has already confirmed 18+ on
+                      // a previous visit, skip the modal — just flip
+                      // straight into adult mode and remember it.
+                      let alreadyConfirmed = false;
+                      try {
+                        alreadyConfirmed =
+                          localStorage.getItem('callnade:adult-confirmed') === '1';
+                      } catch {}
+                      if (alreadyConfirmed) {
+                        setAdultMode(true);
+                        try { localStorage.setItem('callnade:discover-pref', 'adult'); } catch {}
+                      } else {
+                        setAdultPending(true);
+                      }
                     } else {
                       setAdultMode(false);
+                      try { localStorage.setItem('callnade:discover-pref', 'regular'); } catch {}
                     }
                   }}
                 />
@@ -290,16 +316,21 @@ export default function Home() {
           Logged-in users skip it (already accepted at signup). */}
       {!me && <AgeGateModal />}
 
-      {/* 18+ gate modal — pops the moment someone taps the 18+ tab.
-          Confirming flips adultMode, which re-fires the discover
-          queries with `adult=true`. Cancelling stays on the regular
-          tab. No localStorage cookie — we want explicit confirmation
-          every time the user opens the adult bucket fresh. */}
+      {/* 18+ confirmation modal — only pops the FIRST time the user
+          taps the 18+ tab on this browser. Once confirmed we set
+          `callnade:adult-confirmed=1` so subsequent visits skip the
+          modal entirely and just respect the saved tab preference.
+          `callnade:discover-pref` remembers which tab they last had
+          open so they land back there on reload. */}
       <AdultGateModal
         open={adultPending}
         onConfirm={() => {
           setAdultPending(false);
           setAdultMode(true);
+          try {
+            localStorage.setItem('callnade:adult-confirmed', '1');
+            localStorage.setItem('callnade:discover-pref', 'adult');
+          } catch {}
         }}
         onCancel={() => setAdultPending(false)}
       />

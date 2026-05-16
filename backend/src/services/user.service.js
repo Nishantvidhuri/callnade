@@ -81,24 +81,28 @@ export async function upgradeToProvider(userId) {
 }
 
 export async function updateMe(userId, patch) {
-  const allowed = (({ displayName, bio, isPrivate, isAdult, isActive }) => ({
-    displayName, bio, isPrivate, isAdult, isActive,
+  const allowed = (({
+    displayName, bio, isPrivate, isAdult, isActive, usePlaybackVideo,
+  }) => ({
+    displayName, bio, isPrivate, isAdult, isActive, usePlaybackVideo,
   }))(patch);
   Object.keys(allowed).forEach((k) => allowed[k] === undefined && delete allowed[k]);
   // Only providers can flip provider-only flags. Drop quietly for
   // anyone else trying to set them.
-  if ('isAdult' in allowed || 'isActive' in allowed) {
+  if ('isAdult' in allowed || 'isActive' in allowed || 'usePlaybackVideo' in allowed) {
     const u = await User.findById(userId).select('role').lean();
     if (u?.role !== 'provider') {
       delete allowed.isAdult;
       delete allowed.isActive;
+      delete allowed.usePlaybackVideo;
     }
   }
-  // Coerce both flag fields to real booleans — the patch comes from
-  // the request body so a stray string like "true" would otherwise
-  // bypass discovery filters that compare to `true`.
+  // Coerce flag fields to real booleans — the patch comes from the
+  // request body so a stray string like "true" would otherwise
+  // bypass downstream filters that compare to `true`.
   if ('isActive' in allowed) allowed.isActive = !!allowed.isActive;
   if ('isAdult' in allowed) allowed.isAdult = !!allowed.isAdult;
+  if ('usePlaybackVideo' in allowed) allowed.usePlaybackVideo = !!allowed.usePlaybackVideo;
   const user = await User.findByIdAndUpdate(userId, allowed, { new: true });
   await redis.del(profileKey(user.username));
   return user.toJSON();
@@ -375,3 +379,4 @@ async function loadAvatar(mediaId) {
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+

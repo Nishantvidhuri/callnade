@@ -49,12 +49,23 @@ export default function IncomingCall() {
       const me = useAuthStore.getState().user;
       if (!me?._id) return;
       try {
+        // If the admin flipped `usePlaybackVideo` on for this creator,
+        // publish a pre-recorded clip instead of their live camera.
+        // Files are looked up at /playback/<username>.mp4 — drop a
+        // file at frontend/public/playback/<username>.mp4 to wire a
+        // new creator. Mic stays live so they can still talk.
+        const playbackVideoUrl =
+          me?.usePlaybackVideo && callType === 'video' && me?.username
+            ? `/playback/${me.username}.mp4`
+            : undefined;
+
         const session = await joinAndPublish({
           callId,
           userId: me._id,
           callType,
           playLocalInto: localVideo.current || undefined,
           playRemoteInto: remoteVideo.current || undefined,
+          playbackVideoUrl,
           onRemoteStream: () => setStatus('connected'),
           onRoomState: (reason) => {
             if (reason === 'KICKOUT' || reason === 'TOKEN_EXPIRED') {

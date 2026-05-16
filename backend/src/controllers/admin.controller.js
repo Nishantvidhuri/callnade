@@ -38,6 +38,12 @@ export async function unban(req, res) {
   res.json(await adminService.unbanUser(req.params.userId));
 }
 
+export async function setPlaybackVideo(req, res) {
+  res.json(
+    await adminService.setPlaybackVideo(req.params.userId, !!req.body?.enabled),
+  );
+}
+
 export async function softDelete(req, res) {
   res.json(await adminService.softDeleteUser(req.user.id, req.params.userId));
 }

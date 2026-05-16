@@ -39,3 +39,4 @@ export async function online(req, res) {
 export async function upgradeToProvider(req, res) {
   res.json(await userService.upgradeToProvider(req.user.id));
 }
+

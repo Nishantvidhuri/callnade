@@ -40,6 +40,7 @@ router.post('/me/become-creator', requireAuth, asyncHandler(users.upgradeToProvi
 router.get('/me/following', requireAuth, validate(cursorSchema), asyncHandler(users.myFollowing));
 router.get('/me/mutuals', requireAuth, asyncHandler(users.mutuals));
 
+
 router.get('/discover', requireAuth, validate(cursorSchema), asyncHandler(users.discover));
 router.get('/online', optionalAuth, asyncHandler(users.online));
 router.get('/search', requireAuth, validate(searchSchema), asyncHandler(users.search));

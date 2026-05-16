@@ -416,7 +416,7 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
               ref={remoteVideo}
               autoPlay
               playsInline
-              className={`absolute inset-0 w-full h-full object-cover sm:object-contain bg-neutral-900 ${
+              className={`absolute inset-0 w-full h-full object-contain bg-neutral-900 ${
                 showLocalAsHero ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}
             />
@@ -433,7 +433,7 @@ export function CallShell({ status, error, localVideo, remoteVideo, localStreamR
               autoPlay
               playsInline
               muted
-              className={`absolute object-cover transition-all duration-300 bg-neutral-900 ${
+              className={`absolute object-contain transition-all duration-300 bg-neutral-900 ${
                 showLocalAsHero
                   ? 'inset-0 w-full h-full'
                   : `w-20 sm:w-32 lg:w-40 aspect-[3/4] right-3 sm:right-5 rounded-2xl border-2 border-white/40 shadow-xl ${

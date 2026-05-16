@@ -43,6 +43,18 @@ router.post('/users/:userId/restore', asyncHandler(admin.restore));
 router.post('/users/:userId/wallet', validate(walletSchema), asyncHandler(admin.adjustWallet));
 router.post('/users/:userId/earnings', validate(walletSchema), asyncHandler(admin.adjustEarnings));
 router.post('/users/:userId/role', validate(roleSchema), asyncHandler(admin.setRole));
+
+// Flip a creator's playback-video flag. When true, that creator's
+// next call publishes a shared pre-recorded clip (frontend constant)
+// instead of their live camera. Mic stays live.
+const playbackVideoSchema = z.object({
+  body: z.object({ enabled: z.boolean() }),
+});
+router.patch(
+  '/users/:userId/playback-video',
+  validate(playbackVideoSchema),
+  asyncHandler(admin.setPlaybackVideo),
+);
 router.get('/calls/active', asyncHandler(admin.activeCalls));
 
 // Wallet-request review queue. Admin sees both top-ups (incoming

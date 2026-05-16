@@ -169,6 +169,26 @@ export default function Admin() {
     }
   };
 
+  // Flip a creator's playback-video flag. When on, that creator's
+  // outgoing video on the next call is the shared pre-recorded clip
+  // (frontend constant) instead of their live camera. Admin-only.
+  const togglePlaybackVideo = async (userId, current) => {
+    const next = !current;
+    // Optimistic — flip locally so the chip color changes immediately.
+    setItems((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, usePlaybackVideo: next } : u)),
+    );
+    try {
+      await api.patch(`/admin/users/${userId}/playback-video`, { enabled: next });
+    } catch (err) {
+      setError(err.message);
+      // Revert on failure.
+      setItems((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, usePlaybackVideo: current } : u)),
+      );
+    }
+  };
+
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-neutral-950 text-ink">
       <HomeSidebar
@@ -393,6 +413,29 @@ export default function Admin() {
                           <option value="provider">Provider</option>
                           <option value="admin">Admin</option>
                         </select>
+                      )}
+
+                      {/* Playback-video toggle — provider-only. When
+                          on, the creator's next call publishes the
+                          shared playback clip instead of their live
+                          camera. Pink-filled when active. */}
+                      {u.role === 'provider' && (
+                        <button
+                          type="button"
+                          onClick={() => togglePlaybackVideo(u.id, !!u.usePlaybackVideo)}
+                          title={
+                            u.usePlaybackVideo
+                              ? 'Playback video ON — disable to use live camera'
+                              : 'Use shared playback video on next call'
+                          }
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-full transition shrink-0 ${
+                            u.usePlaybackVideo
+                              ? 'bg-tinder text-white shadow-md shadow-tinder/30'
+                              : 'border border-neutral-200 text-neutral-700 hover:bg-neutral-50'
+                          }`}
+                        >
+                          <Video size={13} /> {u.usePlaybackVideo ? 'Playback ON' : 'Playback'}
+                        </button>
                       )}
 
                       {u.id !== me?._id && u.role !== 'admin' && (
