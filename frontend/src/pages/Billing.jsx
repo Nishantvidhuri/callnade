@@ -659,8 +659,8 @@ function loadRazorpayCheckout() {
 function AddCreditsDispatcher({ balance, onClose, onSuccess, user }) {
   // null while we load /wallet/payment-config; bool after.
   const [razorpayEnabled, setRazorpayEnabled] = useState(null);
-  // 'razorpay' (full menu) | 'upi-intent' (UPI app deep-link) |
-  // 'upi-collect' (S2S, no app switch) | 'manual' (QR + reference)
+  // tab is 'razorpay' | 'manual'; once we know the config it's
+  // clamped to 'manual' when Razorpay is off.
   const [tab, setTab] = useState('razorpay');
 
   useEffect(() => {
@@ -674,7 +674,9 @@ function AddCreditsDispatcher({ balance, onClose, onSuccess, user }) {
         if (!enabled) setTab('manual');
       })
       .catch(() => {
-        // Config fetch failed — fail-open to manual.
+        // Config fetch failed — fail-open to manual so the user can
+        // still top up. They won't see the Razorpay tab until config
+        // succeeds.
         if (!cancelled) {
           setRazorpayEnabled(false);
           setTab('manual');
@@ -683,6 +685,8 @@ function AddCreditsDispatcher({ balance, onClose, onSuccess, user }) {
     return () => { cancelled = true; };
   }, []);
 
+  // Loading state: render a small spinner so we don't briefly show
+  // the Razorpay tab and then yank it away.
   if (razorpayEnabled === null) {
     return (
       <div className="py-10 grid place-items-center">
@@ -691,53 +695,53 @@ function AddCreditsDispatcher({ balance, onClose, onSuccess, user }) {
     );
   }
 
-  // The three Razorpay-backed tabs share the same backend gateway
-  // toggle. When Razorpay is off, only the manual flow renders and
-  // we drop the pill entirely (single-tab UIs feel wrong with a
-  // selector).
-  const tabs = razorpayEnabled
-    ? [
-        { id: 'razorpay',    label: 'All methods',  hint: 'Cards · UPI · wallets' },
-        { id: 'upi-intent',  label: 'UPI app',      hint: 'Open Paytm / GPay / PhonePe' },
-        { id: 'upi-collect', label: 'UPI ID',       hint: 'Get a request on your phone' },
-        { id: 'manual',      label: 'QR + ref',     hint: 'Scan & paste reference' },
-      ]
-    : [{ id: 'manual', label: 'QR + ref', hint: 'Scan & paste reference' }];
-
-  const formFor = (id) => {
-    const props = { balance, onClose, onSuccess, user };
-    if (id === 'razorpay')    return <AddCreditsRazorpayForm {...props} />;
-    if (id === 'upi-intent')  return <AddCreditsFormUpiIntent {...props} />;
-    if (id === 'upi-collect') return <AddCreditsFormUpiCollect {...props} />;
-    return <AddCreditsForm {...props} />;
-  };
-
   return (
     <div className="space-y-3">
-      {/* Tab pill — grid on mobile so 4 buttons stack 2x2 cleanly,
-          a single row on sm+. Skipped when only one tab exists. */}
-      {tabs.length > 1 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 rounded-2xl bg-neutral-100 border border-neutral-200">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`px-2 py-1.5 text-[11px] font-bold rounded-xl transition leading-tight ${
-                tab === t.id
-                  ? t.id === 'manual'
-                    ? 'bg-white text-ink shadow-sm'
-                    : 'bg-tinder text-white shadow-sm'
-                  : 'text-neutral-500 hover:text-ink'
-              }`}
-              title={t.hint}
-            >
-              {t.label}
-            </button>
-          ))}
+      {/* Tab pill — only rendered when both options are available.
+          With Razorpay off there's only one path (manual), so we
+          skip the pill entirely. */}
+      {razorpayEnabled && (
+        <div className="inline-flex w-full p-1 rounded-full bg-neutral-100 border border-neutral-200">
+          <button
+            type="button"
+            onClick={() => setTab('razorpay')}
+            className={`flex-1 px-3 py-1.5 text-xs font-bold rounded-full transition ${
+              tab === 'razorpay'
+                ? 'bg-tinder text-white shadow-sm'
+                : 'text-neutral-500 hover:text-ink'
+            }`}
+          >
+            Instant · Razorpay
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('manual')}
+            className={`flex-1 px-3 py-1.5 text-xs font-bold rounded-full transition ${
+              tab === 'manual'
+                ? 'bg-white text-ink shadow-sm'
+                : 'text-neutral-500 hover:text-ink'
+            }`}
+          >
+            QR + Reference
+          </button>
         </div>
       )}
-      {formFor(tab)}
+
+      {razorpayEnabled && tab === 'razorpay' ? (
+        <AddCreditsRazorpayForm
+          balance={balance}
+          onClose={onClose}
+          onSuccess={onSuccess}
+          user={user}
+        />
+      ) : (
+        <AddCreditsForm
+          balance={balance}
+          onClose={onClose}
+          onSuccess={onSuccess}
+          user={user}
+        />
+      )}
     </div>
   );
 }
@@ -756,189 +760,7 @@ function AddCreditsDispatcher({ balance, onClose, onSuccess, user }) {
  * "Razorpay is not configured on this server"), we surface the
  * message and let the user fall back to the manual tab.
  */
-/**
- * UPI-Intent variant — same Razorpay checkout but locked to the UPI
- * payment method so the modal jumps straight to "pick your UPI app".
- * On Android this deep-links into Paytm / GPay / PhonePe / etc.; on
- * iOS Razorpay falls back to a UPI QR scan.
- *
- * Implementation: just wrap AddCreditsRazorpayForm and pass
- * `upiOnly`. The wrapper saves us duplicating ~120 lines.
- */
-function AddCreditsFormUpiIntent(props) {
-  return <AddCreditsRazorpayForm {...props} upiOnly />;
-}
-
-/**
- * UPI-Collect flow — no app-switching. The user types their UPI
- * handle (e.g. `nishant@paytm`); the backend pushes a collect
- * request via Razorpay → their UPI app rings → they approve in the
- * app → we poll /wallet/poll-status until it flips to approved and
- * the wallet credits.
- *
- * Pros over Intent: zero context switch — the user stays on our
- * page the whole time. Cons: requires them to type their VPA.
- */
-function AddCreditsFormUpiCollect({ balance, onClose, onSuccess, user }) {
-  const [amount, setAmount] = useState(100);
-  const [vpa, setVpa] = useState(user?.upiId || '');
-  const [phone, setPhone] = useState(user?.phone || '');
-  // state: 'idle' | 'submitting' | 'waiting' | 'approved' | 'failed'
-  const [state, setState] = useState('idle');
-  const [error, setError] = useState(null);
-  const num = Number(amount) || 0;
-  const vpaLooksValid = /^[\w.\-]{2,}@[\w.\-]{2,}$/.test(vpa.trim()) ||
-    /^\d{10,13}$/.test(vpa.trim()); // accept phone-number style too
-  const canSubmit = num >= 1 && vpaLooksValid && state === 'idle';
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setError(null);
-    if (num < 1) return setError('Enter at least 1 credit');
-    if (!vpaLooksValid) return setError('Enter a valid UPI ID (name@bank) or 10-digit phone');
-    setState('submitting');
-    try {
-      const { data: order } = await api.post('/wallet/upi-collect', {
-        amount: num,
-        vpa: vpa.trim(),
-        phone: phone.trim() || undefined,
-      });
-      setState('waiting');
-
-      // Poll every 2s for ~3 minutes (UPI collect can take a while
-      // if the user is slow to open their notification).
-      const deadline = Date.now() + 3 * 60 * 1000;
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 2000));
-        try {
-          const { data } = await api.get('/wallet/poll-status', {
-            params: { walletRequestId: order.walletRequestId },
-          });
-          if (data?.status === 'approved') {
-            // Refresh user (unwrap envelope, merge with current so we
-            // don't blank out username/displayName — same shape fix
-            // we made for the Razorpay success path).
-            try {
-              const { data: me } = await api.get('/users/me');
-              const fresh = me?.user || me;
-              const current = useAuthStore.getState().user;
-              useAuthStore.getState().setUser({ ...current, ...fresh });
-            } catch { /* non-fatal */ }
-            setState('approved');
-            onSuccess?.();
-            setTimeout(() => onClose?.(), 1200);
-            return;
-          }
-          if (data?.status === 'rejected') {
-            throw new Error(data.reason || 'Payment was rejected');
-          }
-        } catch (err) {
-          // Don't bail on a single failed poll — Razorpay's gateway
-          // is occasionally slow to return status. Only stop on a
-          // real rejection (handled above) or timeout.
-          if (err?.response?.status >= 500 || !err?.response) continue;
-          throw err;
-        }
-      }
-      throw new Error("We haven't received confirmation. Open your UPI app and try again.");
-    } catch (err) {
-      setError(err.message || 'UPI collect failed');
-      setState('failed');
-    }
-  };
-
-  if (state === 'waiting') {
-    return (
-      <div className="text-center py-8 space-y-3">
-        <span
-          aria-label="Waiting"
-          className="mx-auto block w-12 h-12 rounded-full border-4 border-brand-200 border-t-brand-500 animate-spin"
-        />
-        <p className="font-semibold text-sm">Open your UPI app to approve</p>
-        <p className="text-xs text-neutral-500">
-          We've sent a collect request to <span className="font-semibold">{vpa}</span>.
-          Approve it in Paytm / GPay / PhonePe and your wallet credits automatically.
-        </p>
-        {error && (
-          <p className="text-xs text-rose-600">{error}</p>
-        )}
-      </div>
-    );
-  }
-
-  if (state === 'approved') {
-    return (
-      <div className="text-center py-8 space-y-2">
-        <span className="mx-auto w-12 h-12 rounded-full bg-emerald-500 text-white grid place-items-center">
-          <Check size={24} strokeWidth={3} />
-        </span>
-        <p className="font-semibold text-sm">Wallet topped up</p>
-      </div>
-    );
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-4">
-      <div className="rounded-2xl bg-brand-50 border border-brand-100 p-4 text-[12px] text-brand-700">
-        Enter your UPI ID — we'll send a payment request to your phone.
-        Approve it in your UPI app, no app-switching needed.
-      </div>
-
-      <label className="flex flex-col gap-1.5">
-        <span className="text-xs font-bold uppercase tracking-wide text-neutral-700">
-          Amount (credits)
-        </span>
-        <input
-          type="number"
-          min={1}
-          step={1}
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          disabled={state !== 'idle' && state !== 'failed'}
-          className="px-4 py-2.5 text-sm rounded-2xl border border-neutral-300 focus:outline-none focus:border-ink focus:ring-2 focus:ring-black/10 transition disabled:opacity-50"
-        />
-        <small className="text-[11px] text-neutral-500">
-          Current balance · {fmtCredits(balance)} credits
-        </small>
-      </label>
-
-      <label className="flex flex-col gap-1.5">
-        <span className="text-xs font-bold uppercase tracking-wide text-neutral-700">
-          Your UPI ID
-        </span>
-        <input
-          type="text"
-          autoCapitalize="none"
-          autoCorrect="off"
-          placeholder="yourname@paytm"
-          value={vpa}
-          onChange={(e) => setVpa(e.target.value)}
-          disabled={state !== 'idle' && state !== 'failed'}
-          className="px-4 py-2.5 text-sm rounded-2xl border border-neutral-300 focus:outline-none focus:border-ink focus:ring-2 focus:ring-black/10 transition disabled:opacity-50"
-        />
-        <small className="text-[11px] text-neutral-500">
-          Or just type your 10-digit phone number.
-        </small>
-      </label>
-
-      {error && (
-        <div role="alert" className="px-3 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-sm text-rose-700">
-          {error}
-        </div>
-      )}
-
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="w-full px-5 py-3 text-sm font-bold rounded-full text-white bg-tinder shadow-md shadow-tinder/30 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition"
-      >
-        {state === 'submitting' ? 'Sending request…' : `Send ₹${num || 0} request`}
-      </button>
-    </form>
-  );
-}
-
-function AddCreditsRazorpayForm({ balance, onClose, onSuccess, user, upiOnly = false }) {
+function AddCreditsRazorpayForm({ balance, onClose, onSuccess, user }) {
   const [amount, setAmount] = useState(100);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -974,10 +796,6 @@ function AddCreditsRazorpayForm({ balance, onClose, onSuccess, user, upiOnly = f
           name: user?.displayName || user?.username || undefined,
           contact: user?.phone || undefined,
         },
-        // When `upiOnly` is on, lock the checkout to UPI methods so
-        // the modal jumps straight to "Pick your UPI app" (Razorpay
-        // handles the deep-link to Paytm / GPay / PhonePe on mobile).
-        ...(upiOnly ? { method: { upi: true } } : {}),
         theme: { color: '#ec4899' },
         handler: async (response) => {
           try {
